@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" role="img">
+  <title>Overlapping kernels on two streams</title>
+  <desc>alpha runs 60 ns on stream 1 and beta runs 60 ns on stream 2. They overlap, so the durations add to 120 ns while the GPU is busy for 100 ns. The ceiling is withheld.</desc>
+  <defs>
+    <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(40)">
+      <rect width="8" height="8" fill="#ffe4e6"/>
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#be123c" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="960" height="300" rx="16" fill="#f4f6f8"/>
+  <text x="40" y="42" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="650">Two streams, one step of 100 ns</text>
+  <text x="40" y="68" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">Adding the launches counts the overlap twice.</text>
+  <text x="40" y="122" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">stream 1</text>
+  <rect x="150" y="102" width="432" height="32" rx="4" fill="#1d4ed8"/>
+  <text x="366" y="123" fill="#ffffff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="650" text-anchor="middle">alpha, 60 ns</text>
+  <text x="40" y="178" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">stream 2</text>
+  <rect x="438" y="158" width="432" height="32" rx="4" fill="#0f766e"/>
+  <text x="654" y="179" fill="#ffffff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="650" text-anchor="middle">beta, 60 ns</text>
+  <rect x="438" y="102" width="144" height="88" fill="url(#hatch)" stroke="#be123c" stroke-width="1.5"/>
+  <text x="510" y="78" fill="#be123c" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="650" text-anchor="middle">overlap</text>
+  <path d="M150 214 H870" stroke="#94a3b8" stroke-width="1.5"/>
+  <path d="M150 210 V218" stroke="#94a3b8" stroke-width="1.5"/>
+  <path d="M438 210 V218" stroke="#be123c" stroke-width="1.5"/>
+  <path d="M582 210 V218" stroke="#be123c" stroke-width="1.5"/>
+  <path d="M870 210 V218" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="150" y="238" fill="#5c6b7a" font-family="ui-monospace, monospace" font-size="12">0</text>
+  <text x="438" y="238" fill="#be123c" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">40</text>
+  <text x="582" y="238" fill="#be123c" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">60</text>
+  <text x="870" y="238" fill="#5c6b7a" font-family="ui-monospace, monospace" font-size="12" text-anchor="end">100 ns</text>
+  <rect x="40" y="252" width="880" height="28" rx="8" fill="#ffffff" stroke="#d8dee6"/>
+  <text x="56" y="271" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">60 + 60 = 120 ns added. The GPU was busy for 100 ns. Ceiling withheld.</text>
+</svg>

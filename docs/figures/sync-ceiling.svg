@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 320" role="img">
+  <title>An 80 ns kernel inside a 1000 ns step</title>
+  <desc>pressure occupies the first 80 ns. The context synchronize blocks the other 920 ns. The ceiling is 80 ns, under 10 percent of the step.</desc>
+  <rect width="960" height="320" rx="16" fill="#f4f6f8"/>
+  <text x="40" y="42" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="650">One step, 1000 ns</text>
+  <text x="40" y="68" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">The hot kernel is the thin slice. The synchronize is the step.</text>
+  <text x="40" y="118" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">GPU</text>
+  <rect x="120" y="100" width="60.8" height="28" rx="4" fill="#1d4ed8"/>
+  <rect x="180.8" y="100" width="699.2" height="28" fill="#e7edf5"/>
+  <text x="120" y="92" fill="#1d4ed8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="650">pressure, 80 ns</text>
+  <text x="40" y="178" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">blocks</text>
+  <text x="40" y="196" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">the step</text>
+  <rect x="120" y="164" width="60.8" height="36" rx="4" fill="#1d4ed8"/>
+  <rect x="180.8" y="164" width="699.2" height="36" rx="4" fill="#c2410c"/>
+  <text x="530" y="187" fill="#ffffff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="650" text-anchor="middle">context synchronize, 920 ns</text>
+  <path d="M120 220 H880" stroke="#94a3b8" stroke-width="1.5"/>
+  <path d="M120 216 V224" stroke="#94a3b8" stroke-width="1.5"/>
+  <path d="M180.8 216 V224" stroke="#1d4ed8" stroke-width="1.5"/>
+  <path d="M880 216 V224" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="120" y="244" fill="#5c6b7a" font-family="ui-monospace, monospace" font-size="12">0</text>
+  <text x="180.8" y="244" fill="#1d4ed8" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">80</text>
+  <text x="880" y="244" fill="#5c6b7a" font-family="ui-monospace, monospace" font-size="12" text-anchor="end">1000 ns</text>
+  <rect x="40" y="262" width="880" height="36" rx="8" fill="#ffffff" stroke="#d8dee6"/>
+  <text x="56" y="285" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">Ceiling of pressure: 80 ns, under 10% of the step. allow_rewrite is false.</text>
+</svg>

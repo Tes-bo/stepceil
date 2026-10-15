@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 200" role="img">
+  <title>stepceil turns one Nsight Systems step into a ledger</title>
+  <desc>A sqlite export of one NVTX range goes through stepceil and comes out as the longest blocker, the kernel ceiling, and allow_rewrite.</desc>
+  <rect width="960" height="200" rx="16" fill="#f4f6f8"/>
+  <rect x="36" y="40" width="250" height="120" rx="12" fill="#ffffff" stroke="#d8dee6"/>
+  <text x="56" y="74" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">Nsight Systems</text>
+  <text x="56" y="104" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">one NVTX range</text>
+  <text x="56" y="132" fill="#1d4ed8" font-family="ui-monospace, monospace" font-size="14">report.sqlite</text>
+  <path d="M302 100 H328" stroke="#94a3b8" stroke-width="2"/>
+  <path d="M322 94 L334 100 L322 106" fill="#94a3b8"/>
+  <rect x="346" y="40" width="230" height="120" rx="12" fill="#ffffff" stroke="#d8dee6"/>
+  <text x="366" y="74" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">stepceil</text>
+  <text x="366" y="104" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">clip the step</text>
+  <text x="366" y="128" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">withhold overlap</text>
+  <path d="M592 100 H618" stroke="#94a3b8" stroke-width="2"/>
+  <path d="M612 94 L624 100 L612 106" fill="#94a3b8"/>
+  <rect x="636" y="40" width="288" height="120" rx="12" fill="#ffffff" stroke="#d8dee6"/>
+  <text x="656" y="74" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">ledger</text>
+  <text x="656" y="104" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">longest blocker</text>
+  <text x="656" y="128" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">kernel ceiling, allow_rewrite</text>
+</svg>
