@@ -118,7 +118,11 @@ def _require_identity(ops, range_name):
         raise StepceilError(
             "a device operation has no stream id; overlap cannot be judged"
         )
-    devices = sorted({op.device_id for op in ops})
+    devices = set()
+    for op in ops:
+        devices.add(op.device_id)
+        devices.update(op.peer_device_ids)
+    devices = sorted(devices)
     if len(devices) > 1:
         ids = ", ".join(str(device) for device in devices)
         raise StepceilError(

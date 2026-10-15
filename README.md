@@ -234,7 +234,9 @@ Kernel names come from `shortName`, then `demangledName`, then `mangledName`. NV
 
 Memcpy and synchronization names come from `ENUM_CUDA_MEMCPY_OPER` and `ENUM_CUPTI_SYNC_TYPE` when those tables are in the export. Nsight Systems 2022.4 numbers memcpy kinds differently from older CUPTI headers, so the file's label wins. Exports without those tables keep stepceil's short names, such as `memcpy HtoD` and `context synchronize`.
 
-More than one `deviceId` inside the step exits 2 and prints no ledger.
+A synchronization row whose enum label is `Unknown` is still named from the export when one `CUPTI_ACTIVITY_KIND_RUNTIME` call of the same `correlationId` overlaps it. Nsight Systems 2022.4 records `cudaDeviceSynchronize` that way.
+
+More than one GPU inside the step exits 2 and prints no ledger. A peer copy counts `srcDeviceId` and `dstDeviceId` as well as `deviceId`. A null peer column is not a GPU. Work that does not meet the NVTX range is ignored, including a peer copy that lies entirely outside it.
 
 ## Agent
 

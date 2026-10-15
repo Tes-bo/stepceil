@@ -12,6 +12,7 @@ class DeviceOp:
     stream_id: int | None
     device_id: int | None
     context_id: int | None = None
+    peer_device_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -210,6 +210,95 @@ class ReadTest(unittest.TestCase):
             self.assertEqual(ledger["longest_blocker"]["name"], "memcpy Host-to-Array")
             self.assertNotIn("HtoH", ledger["longest_blocker"]["name"])
 
+    def test_peer_copy_names_the_other_gpu(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            touched = Path(tmp) / "peer.sqlite"
+            write_export(
+                touched,
+                [{"text": "step", "start": 0, "end": 40}],
+                copies=[{"start": 0, "end": 40, "copy_kind": 10}],
+            )
+            _add_peer_columns(touched, src=0, dst=1)
+            with self.assertRaisesRegex(StepceilError, "device ids 0, 1"):
+                account(load_path(touched, "step"))
+
+            outside = Path(tmp) / "outside.sqlite"
+            write_export(
+                outside,
+                [{"text": "step", "start": 0, "end": 40}],
+                kernels=[{"name": "pressure", "start": 0, "end": 40}],
+                copies=[{"start": 100, "end": 140, "copy_kind": 10}],
+            )
+            _add_peer_columns(outside, src=0, dst=1)
+            ledger = account(load_path(outside, "step"))
+            self.assertEqual(ledger["hottest_kernel"]["name"], "pressure")
+
+            same = Path(tmp) / "same.sqlite"
+            write_export(
+                same,
+                [{"text": "step", "start": 0, "end": 40}],
+                copies=[{"start": 0, "end": 40, "copy_kind": 4}],
+            )
+            _add_peer_columns(same, src=0, dst=0)
+            ledger = account(load_path(same, "step"))
+            self.assertEqual(ledger["longest_blocker"]["kind"], "memcpy")
+
+    def test_runtime_call_names_an_unknown_synchronize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(
+                path,
+                [{"text": "step", "start": 0, "end": 100}],
+                syncs=[{"sync_type": 0, "start": 0, "end": 100}],
+            )
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "ALTER TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION "
+                "ADD COLUMN correlationId INTEGER"
+            )
+            connection.execute(
+                "UPDATE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION SET correlationId = 9"
+            )
+            connection.execute(
+                """
+                CREATE TABLE ENUM_CUPTI_SYNC_TYPE (
+                    id INTEGER, name TEXT, label TEXT
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO ENUM_CUPTI_SYNC_TYPE VALUES (0, 'UNK', 'Unknown')"
+            )
+            connection.execute(
+                """
+                CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (
+                    start INTEGER,
+                    end INTEGER,
+                    correlationId INTEGER,
+                    nameId INTEGER
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO StringIds (id, value) VALUES (3, 'cudaLaunchKernel')"
+            )
+            connection.execute(
+                "INSERT INTO StringIds (id, value) VALUES (4, 'cudaDeviceSynchronize')"
+            )
+            # Same correlation id, but the launch does not meet the sync.
+            connection.execute(
+                "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (200, 210, 9, 3)"
+            )
+            connection.execute(
+                "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (0, 100, 9, 4)"
+            )
+            connection.commit()
+            connection.close()
+            ledger = account(load_path(path, "step"))
+            self.assertEqual(
+                ledger["longest_blocker"]["name"], "cudaDeviceSynchronize"
+            )
+
     def test_readme_examples_are_the_exports_in_the_repository(self):
         readme = (ROOT / "README.md").read_text()
         examples = ROOT / "examples"
@@ -224,6 +313,22 @@ class ReadTest(unittest.TestCase):
         self.assertTrue(diff["faster"])
         self.assertEqual(diff["step_time_ns_delta"], -800)
         self.assertEqual(diff["after_longest_blocker"]["kind"], "sync")
+
+
+def _add_peer_columns(path, src, dst):
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "ALTER TABLE CUPTI_ACTIVITY_KIND_MEMCPY ADD COLUMN srcDeviceId INTEGER"
+    )
+    connection.execute(
+        "ALTER TABLE CUPTI_ACTIVITY_KIND_MEMCPY ADD COLUMN dstDeviceId INTEGER"
+    )
+    connection.execute(
+        "UPDATE CUPTI_ACTIVITY_KIND_MEMCPY SET srcDeviceId = ?, dstDeviceId = ?",
+        (src, dst),
+    )
+    connection.commit()
+    connection.close()
 
 
 if __name__ == "__main__":

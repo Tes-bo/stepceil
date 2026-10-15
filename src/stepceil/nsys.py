@@ -122,7 +122,7 @@ def _load(connection, range_name):
     device_ops.extend(_kernels(connection, strings, start_ns, end_ns))
     device_ops.extend(_memcpys(connection, start_ns, end_ns, copy_labels))
     device_ops.extend(_memsets(connection, start_ns, end_ns))
-    syncs = _syncs(connection, start_ns, end_ns, sync_labels)
+    syncs = _syncs(connection, strings, start_ns, end_ns, sync_labels)
     return StepWindow(
         name=range_name,
         start_ns=start_ns,
@@ -203,11 +203,14 @@ def _memcpys(connection, start_ns, end_ns, copy_labels):
         return []
     columns = _columns(connection, table)
     _require_columns(connection, table, ("start", "end", "deviceId", "streamId"))
-    extra = ("copyKind",) if "copyKind" in columns else ()
+    extra = tuple(
+        name for name in ("copyKind", "srcDeviceId", "dstDeviceId")
+        if name in columns
+    )
     rows = _device_rows(connection, table, columns, start_ns, end_ns, extra)
     ops = []
     for row in rows:
-        if extra:
+        if "copyKind" in extra:
             name = _memcpy_name(row["copyKind"], copy_labels)
         else:
             name = "memcpy"
@@ -225,14 +228,19 @@ def _memsets(connection, start_ns, end_ns):
     return [_device_op("memset", "memset", row, table) for row in rows]
 
 
-def _syncs(connection, start_ns, end_ns, sync_labels):
+def _syncs(connection, strings, start_ns, end_ns, sync_labels):
     table = "CUPTI_ACTIVITY_KIND_SYNCHRONIZATION"
     if not _has_table(connection, table):
         return []
     _require_columns(connection, table, ("start", "end", "syncType"))
+    columns = _columns(connection, table)
+    selected = ["start", "end", "syncType"]
+    if "correlationId" in columns:
+        selected.append("correlationId")
+    runtime = _runtime_index(connection, strings)
     query = (
-        "SELECT start, end, syncType FROM "
-        f"{table} WHERE end > ? AND start < ?"
+        f"SELECT {', '.join(selected)} FROM {table} "
+        "WHERE end > ? AND start < ?"
     )
     syncs = []
     for row in connection.execute(query, (start_ns, end_ns)):
@@ -242,6 +250,13 @@ def _syncs(connection, start_ns, end_ns, sync_labels):
             continue
         sync_type = _required_int(row, "syncType", table)
         name = _sync_name(sync_type, sync_labels)
+        correlation = row["correlationId"] if "correlationId" in row.keys() else None
+        if correlation is not None:
+            runtime_name = _overlapping_runtime_name(
+                runtime, int(correlation), start, end
+            )
+            if runtime_name:
+                name = runtime_name
         syncs.append(SyncOp(name=name, start_ns=start, end_ns=end))
     return syncs
 
@@ -263,15 +278,73 @@ def _device_op(kind, name, row, table):
     context_id = None
     if "contextId" in keys and row["contextId"] is not None:
         context_id = int(row["contextId"])
+    device_id = _required_int(row, "deviceId", table)
     return DeviceOp(
         kind=kind,
         name=name,
         start_ns=_required_int(row, "start", table),
         end_ns=_required_int(row, "end", table),
         stream_id=_required_int(row, "streamId", table),
-        device_id=_required_int(row, "deviceId", table),
+        device_id=device_id,
         context_id=context_id,
+        peer_device_ids=_peer_device_ids(row, device_id),
     )
+
+
+def _peer_device_ids(row, device_id):
+    """Other GPUs named on a copy.
+
+    Nsight Systems records a peer copy with deviceId of the context that
+    issued it. srcDeviceId and dstDeviceId name the GPUs that actually
+    take part. A null column means the export did not name one.
+    """
+    found = []
+    keys = row.keys()
+    for column in ("srcDeviceId", "dstDeviceId"):
+        if column not in keys or row[column] is None:
+            continue
+        other = int(row[column])
+        if other != device_id and other not in found:
+            found.append(other)
+    return tuple(found)
+
+
+def _runtime_index(connection, strings):
+    """Runtime API calls keyed by correlation id.
+
+    CUPTI_ACTIVITY_KIND_SYNCHRONIZATION labels cudaDeviceSynchronize as
+    Unknown in Nsight Systems 2022.4. The runtime row with the same
+    correlation id carries the API name.
+    """
+    table = "CUPTI_ACTIVITY_KIND_RUNTIME"
+    if not _has_table(connection, table):
+        return {}
+    columns = _columns(connection, table)
+    needed = ("start", "end", "correlationId", "nameId")
+    if any(name not in columns for name in needed):
+        return {}
+    grouped = {}
+    query = f"SELECT {', '.join(needed)} FROM {table}"
+    for row in connection.execute(query):
+        if row["correlationId"] is None or row["start"] is None or row["end"] is None:
+            continue
+        name = _lookup_string(row["nameId"], strings)
+        if not name or name == "unresolved" or name.startswith("unresolved:"):
+            continue
+        grouped.setdefault(int(row["correlationId"]), []).append(
+            (int(row["start"]), int(row["end"]), name)
+        )
+    return grouped
+
+
+def _overlapping_runtime_name(runtime, correlation_id, start, end):
+    names = []
+    for call_start, call_end, name in runtime.get(correlation_id, ()):
+        if call_end > start and call_start < end and name not in names:
+            names.append(name)
+    if len(names) == 1:
+        return names[0]
+    return None
 
 
 def _enum_labels(connection, table):
