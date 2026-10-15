@@ -1,0 +1,249 @@
+import _path  # noqa: F401
+import random
+import unittest
+
+from stepceil.format import render_json, render_text
+from stepceil.intervals import length, merge
+from stepceil.ledger import (
+    ASSUMPTION_EXCLUSIVE,
+    ASSUMPTION_MULTI,
+    ASSUMPTION_SAME,
+    account,
+    overlap_class,
+)
+from stepceil.model import DeviceOp, StepWindow, SyncOp
+from _path import ROOT
+
+
+def window(start, end, ops=(), syncs=(), name="step"):
+    return StepWindow(name, start, end, tuple(ops), tuple(syncs))
+
+
+def kernel(name, start, end, stream_id=1, device_id=0, context_id=1):
+    return DeviceOp("kernel", name, start, end, stream_id, device_id, context_id)
+
+
+def copy(start, end, name="memcpy HtoD", stream_id=1):
+    return DeviceOp("memcpy", name, start, end, stream_id, 0, 1)
+
+
+class LedgerTest(unittest.TestCase):
+    def test_readme_sync_hides_the_hot_kernel(self):
+        ledger = account(window(
+            0, 1000,
+            [kernel("pressure", 0, 80)],
+            [SyncOp("context synchronize", 0, 1000)],
+        ))
+        self.assertEqual(ledger["gpu_busy_ns"], 80)
+        self.assertEqual(ledger["gpu_idle_ns"], 920)
+        self.assertEqual(ledger["longest_blocker"]["kind"], "sync")
+        self.assertEqual(ledger["longest_blocker"]["start_ns"], 80)
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 920)
+        self.assertEqual(ledger["hottest_kernel"]["ceiling_ns"], 80)
+        self.assertFalse(ledger["allow_rewrite"])
+        self.assertIsNone(ledger["ceiling_refused"])
+        self.assertIsNone(ledger["hottest_kernel"]["source"])
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn(render_text(ledger), readme)
+        self.assertIn(render_json(ledger), readme)
+
+    def test_readme_overlap_uses_the_union(self):
+        ledger = account(window(0, 100, [
+            kernel("alpha", 0, 60, stream_id=1),
+            kernel("beta", 40, 100, stream_id=2),
+        ]))
+        self.assertEqual(ledger["gpu_busy_ns"], 100)
+        self.assertEqual(ledger["gpu_idle_ns"], 0)
+        self.assertIsNone(ledger["ceiling_ns"])
+        self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
+        self.assertFalse(ledger["allow_rewrite"])
+        readme = (ROOT / "README.md").read_text()
+        self.assertIn(render_text(ledger), readme)
+
+    def test_ceiling_is_the_sum_of_launches(self):
+        ledger = account(window(0, 100, [
+            kernel("pressure", 0, 6),
+            kernel("pressure", 10, 16),
+        ]))
+        self.assertEqual(ledger["ceiling_ns"], 12)
+        self.assertEqual(ledger["hottest_kernel"]["instances"], 2)
+        self.assertTrue(ledger["allow_rewrite"])
+        self.assertEqual(ledger["longest_blocker"]["kind"], "gap")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 84)
+        self.assertEqual(
+            ledger["gpu_busy_ns"] + ledger["gpu_idle_ns"],
+            ledger["step_time_ns"],
+        )
+
+    def test_rewrite_threshold_boundaries(self):
+        under = account(window(0, 100, [kernel("pressure", 0, 9)]))
+        exact = account(window(0, 100, [kernel("pressure", 0, 10)]))
+        self.assertFalse(under["allow_rewrite"])
+        self.assertEqual(under["ceiling_ns"], 9)
+        self.assertTrue(exact["allow_rewrite"])
+        self.assertEqual(exact["ceiling_ns"], 10)
+
+    def test_touching_launches_are_not_overlap(self):
+        ledger = account(window(0, 30, [
+            kernel("pressure", 0, 10),
+            kernel("pressure", 10, 20),
+        ]))
+        self.assertEqual(ledger["assumption"], ASSUMPTION_EXCLUSIVE)
+        self.assertEqual(ledger["ceiling_ns"], 20)
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 10)
+        self.assertEqual(ledger["gpu_busy_ns"], 20)
+
+    def test_same_stream_overlap_withholds_the_ceiling(self):
+        ledger = account(window(0, 20, [
+            kernel("pressure", 0, 10),
+            kernel("pressure", 5, 15),
+        ]))
+        self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_SAME)
+        self.assertEqual(ledger["gpu_busy_ns"], 15)
+        self.assertIsNone(ledger["longest_blocker"])
+
+    def test_different_contexts_count_as_overlap(self):
+        ledger = account(window(0, 20, [
+            kernel("pressure", 0, 10, context_id=1),
+            kernel("other", 5, 15, context_id=2),
+        ]))
+        self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
+
+    def test_overlap_outside_the_step_does_not_count(self):
+        ledger = account(window(0, 40, [
+            kernel("pressure", 0, 100, stream_id=1),
+            kernel("other", 50, 150, stream_id=2),
+        ]))
+        self.assertEqual(ledger["assumption"], ASSUMPTION_EXCLUSIVE)
+        self.assertEqual(ledger["ceiling_ns"], 40)
+        self.assertEqual(ledger["gpu_busy_ns"], 40)
+
+    def test_other_gpu_outside_the_step_is_ignored(self):
+        ledger = account(window(0, 100, [
+            kernel("pressure", 0, 40, device_id=0),
+            kernel("other", 200, 300, device_id=1),
+        ]))
+        self.assertEqual(ledger["ceiling_ns"], 40)
+
+    def test_two_gpus_inside_the_step_refuse(self):
+        with self.assertRaisesRegex(Exception, "device ids 0, 1"):
+            account(window(0, 100, [
+                kernel("pressure", 0, 40, device_id=0),
+                kernel("other", 50, 80, device_id=1),
+            ]))
+
+    def test_partial_launches_are_clipped(self):
+        ledger = account(window(100, 200, [
+            kernel("pressure", 50, 150),
+            kernel("pressure", 180, 250),
+        ]))
+        self.assertEqual(ledger["ceiling_ns"], 70)
+        self.assertEqual(ledger["gpu_busy_ns"], 70)
+        self.assertEqual(ledger["gpu_idle_ns"], 30)
+        self.assertEqual(ledger["longest_blocker"]["name"], "pressure")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 50)
+
+    def test_empty_step_is_one_gap(self):
+        ledger = account(window(0, 100))
+        self.assertEqual(ledger["gpu_busy_ns"], 0)
+        self.assertEqual(ledger["ceiling_ns"], 0)
+        self.assertIsNone(ledger["hottest_kernel"])
+        self.assertEqual(ledger["longest_blocker"]["kind"], "gap")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 100)
+        self.assertFalse(ledger["allow_rewrite"])
+
+    def test_sync_does_not_take_kernel_time(self):
+        ledger = account(window(
+            0, 100,
+            [kernel("pressure", 0, 50)],
+            [SyncOp("context synchronize", 90, 100)],
+        ))
+        self.assertEqual(ledger["longest_blocker"]["kind"], "kernel")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 50)
+        kinds = {
+            ledger["longest_blocker"]["kind"],
+        }
+        self.assertIn("kernel", kinds)
+        gap = account(window(
+            0, 100,
+            [kernel("small", 0, 10)],
+            [SyncOp("context synchronize", 90, 100)],
+        ))
+        self.assertEqual(gap["longest_blocker"]["kind"], "gap")
+        self.assertEqual(gap["longest_blocker"]["start_ns"], 10)
+        self.assertEqual(gap["longest_blocker"]["end_ns"], 90)
+
+    def test_adjacent_sync_coverage_merges_one_call(self):
+        ledger = account(window(0, 100, syncs=[
+            SyncOp("context synchronize", 0, 80),
+            SyncOp("stream synchronize", 70, 100),
+        ]))
+        self.assertEqual(ledger["longest_blocker"]["name"], "context synchronize")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 80)
+
+    def test_hottest_tie_uses_the_earlier_launch(self):
+        ledger = account(window(0, 100, [
+            kernel("alpha", 50, 90),
+            kernel("beta", 0, 40),
+        ]))
+        self.assertEqual(ledger["hottest_kernel"]["name"], "beta")
+        self.assertEqual(ledger["ceiling_ns"], 40)
+
+    def test_longest_tie_uses_the_earlier_interval(self):
+        ledger = account(window(0, 100, [
+            kernel("pressure", 50, 100),
+            copy(0, 50),
+        ]))
+        self.assertEqual(ledger["longest_blocker"]["kind"], "memcpy")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 50)
+
+    def test_overlap_class_matches_pairs(self):
+        rng = random.Random(1)
+        for _ in range(40):
+            ops = []
+            for _index in range(rng.randint(0, 12)):
+                start = rng.randint(0, 900)
+                ops.append(kernel(
+                    rng.choice(["a", "b"]),
+                    start,
+                    start + rng.randint(1, 100),
+                    stream_id=rng.choice([1, 2]),
+                    context_id=rng.choice([1, 2]),
+                ))
+            self.assertEqual(overlap_class(ops), _reference_overlap(ops))
+            ledger = account(window(0, 1000, ops))
+            self.assertEqual(
+                ledger["gpu_busy_ns"] + ledger["gpu_idle_ns"],
+                1000,
+            )
+            self.assertEqual(
+                ledger["gpu_busy_ns"],
+                length(merge((op.start_ns, op.end_ns) for op in ops)),
+            )
+            if _reference_overlap(ops) is None:
+                self.assertIsNone(ledger["ceiling_refused"])
+            else:
+                self.assertIsNone(ledger["ceiling_ns"])
+
+
+def _reference_overlap(ops):
+    multi = False
+    same = False
+    for index, left in enumerate(ops):
+        for right in ops[index + 1:]:
+            if left.start_ns < right.end_ns and right.start_ns < left.end_ns:
+                left_key = (left.context_id, left.stream_id)
+                right_key = (right.context_id, right.stream_id)
+                if left_key != right_key:
+                    multi = True
+                else:
+                    same = True
+    if multi:
+        return "multi"
+    if same:
+        return "same"
+    return None
+
+
+if __name__ == "__main__":
+    unittest.main()

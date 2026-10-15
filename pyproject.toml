@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stepceil"
+version = "0.1.0"
+description = "Speedup ceiling of one GPU step: time left if its hottest kernel cost nothing."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Tesbo"}]
+dependencies = []
+
+[project.scripts]
+stepceil = "stepceil.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

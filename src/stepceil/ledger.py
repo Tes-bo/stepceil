@@ -1,0 +1,260 @@
+"""Account one NVTX step.
+
+Device time blocks the step only when the clipped device intervals do not
+overlap. The ceiling of the hottest kernel is the sum of its clipped
+launches. Overlap withholds that ceiling. A synchronization call counts
+only on idle time; time already covered by a kernel, copy, or memset stays
+on that operation.
+"""
+
+from dataclasses import replace
+
+from stepceil import REWRITE_DENOMINATOR, REWRITE_NUMERATOR
+from stepceil.errors import StepceilError
+from stepceil.intervals import complement, length, merge
+
+ASSUMPTION_EXCLUSIVE = "single stream, no overlapping device work"
+ASSUMPTION_MULTI = "overlapping device work on more than one stream"
+ASSUMPTION_SAME = "device activities overlap on one stream"
+GPU_IDLE_NAME = "gpu idle"
+
+KIND_RANK = {
+    "kernel": 0,
+    "memcpy": 1,
+    "memset": 2,
+    "sync": 3,
+    "gap": 4,
+}
+
+
+def account(window):
+    if window.end_ns <= window.start_ns:
+        raise StepceilError(
+            f"NVTX range {window.name!r} ends at or before it starts"
+        )
+    clipped = []
+    for op in window.device_ops:
+        piece = _clip_op(op, window.start_ns, window.end_ns)
+        if piece is not None:
+            clipped.append(piece)
+    _require_identity(clipped, window.name)
+
+    step_time = window.end_ns - window.start_ns
+    busy_spans = merge((op.start_ns, op.end_ns) for op in clipped)
+    busy = length(busy_spans)
+    idle = step_time - busy
+    if busy + idle != step_time or busy < 0 or idle < 0:
+        raise RuntimeError("busy and idle do not add up to the step")
+
+    overlap = overlap_class(clipped)
+    if overlap == "multi":
+        return _refused(window, busy, idle, ASSUMPTION_MULTI)
+    if overlap == "same":
+        return _refused(window, busy, idle, ASSUMPTION_SAME)
+
+    holes = complement(busy_spans, window.start_ns, window.end_ns)
+    sync_pieces, gap_pieces = _idle_pieces(holes, window.syncs)
+    candidates = [_op_candidate(op) for op in clipped]
+    candidates.extend(
+        _candidate("sync", sync.name, start, end)
+        for start, end, sync in sync_pieces
+    )
+    candidates.extend(
+        _candidate("gap", GPU_IDLE_NAME, start, end)
+        for start, end in gap_pieces
+    )
+    longest = _longest(candidates)
+    hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
+    return _ledger(
+        window,
+        busy,
+        idle,
+        ASSUMPTION_EXCLUSIVE,
+        longest,
+        hottest,
+        ceiling,
+        _allows_rewrite(ceiling, step_time),
+        None,
+    )
+
+
+def overlap_class(ops):
+    """Return None, 'multi', or 'same' for clipped device operations."""
+    ordered = sorted(ops, key=lambda op: (op.start_ns, op.end_ns, op.stream_id))
+    if not ordered:
+        return None
+    current = ordered[0]
+    multi = False
+    same = False
+    for nxt in ordered[1:]:
+        if nxt.start_ns < current.end_ns:
+            if _stream_key(nxt) != _stream_key(current):
+                multi = True
+            else:
+                same = True
+            if nxt.end_ns > current.end_ns:
+                current = nxt
+        else:
+            current = nxt
+    if multi:
+        return "multi"
+    if same:
+        return "same"
+    return None
+
+
+def _clip_op(op, lo, hi):
+    start = max(op.start_ns, lo)
+    end = min(op.end_ns, hi)
+    if end <= start:
+        return None
+    return replace(op, start_ns=start, end_ns=end)
+
+
+def _require_identity(ops, range_name):
+    if any(op.device_id is None for op in ops):
+        raise StepceilError("a device operation has no device id")
+    if any(op.stream_id is None for op in ops):
+        raise StepceilError(
+            "a device operation has no stream id; overlap cannot be judged"
+        )
+    devices = sorted({op.device_id for op in ops})
+    if len(devices) > 1:
+        ids = ", ".join(str(device) for device in devices)
+        raise StepceilError(
+            f"more than one GPU in NVTX range {range_name!r} "
+            f"(device ids {ids}); this version does not account that"
+        )
+
+
+def _stream_key(op):
+    return (op.context_id, op.stream_id)
+
+
+def _idle_pieces(holes, syncs):
+    sync_pieces = []
+    gap_pieces = []
+    for hole_start, hole_end in holes:
+        covered, gaps = _split_hole(hole_start, hole_end, syncs)
+        sync_pieces.extend(covered)
+        gap_pieces.extend(gaps)
+    return sync_pieces, merge(gap_pieces)
+
+
+def _split_hole(hole_start, hole_end, syncs):
+    cuts = []
+    for sync in syncs:
+        start = max(sync.start_ns, hole_start)
+        end = min(sync.end_ns, hole_end)
+        if end > start:
+            cuts.append((start, end, sync))
+    if not cuts:
+        return [], [(hole_start, hole_end)]
+
+    points = {hole_start, hole_end}
+    for start, end, _sync in cuts:
+        points.add(start)
+        points.add(end)
+    bounds = sorted(points)
+    raw_sync = []
+    raw_gap = []
+    for start, end in zip(bounds, bounds[1:]):
+        if end <= start:
+            continue
+        covering = [
+            sync for cut_start, cut_end, sync in cuts
+            if cut_start <= start and cut_end >= end
+        ]
+        if not covering:
+            raw_gap.append((start, end))
+            continue
+        chosen = min(covering, key=lambda sync: (sync.start_ns, sync.name))
+        raw_sync.append((start, end, chosen))
+    return _merge_sync(raw_sync), raw_gap
+
+
+def _merge_sync(parts):
+    if not parts:
+        return []
+    merged = [parts[0]]
+    for start, end, sync in parts[1:]:
+        previous_start, previous_end, previous = merged[-1]
+        if sync is previous and start == previous_end:
+            merged[-1] = (previous_start, end, sync)
+        else:
+            merged.append((start, end, sync))
+    return merged
+
+
+def _op_candidate(op):
+    return _candidate(op.kind, op.name, op.start_ns, op.end_ns)
+
+
+def _candidate(kind, name, start, end):
+    return {
+        "kind": kind,
+        "name": name,
+        "start_ns": start,
+        "end_ns": end,
+        "blocking_ns": end - start,
+        "source": None,
+    }
+
+
+def _longest(candidates):
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda item: (
+            -item["blocking_ns"],
+            item["start_ns"],
+            KIND_RANK[item["kind"]],
+            item["name"],
+        ),
+    )
+
+
+def _hottest(kernels):
+    if not kernels:
+        return None, 0
+    groups = {}
+    for op in kernels:
+        duration = op.end_ns - op.start_ns
+        ceiling, count, first = groups.get(op.name, (0, 0, op.start_ns))
+        groups[op.name] = (ceiling + duration, count + 1, min(first, op.start_ns))
+    name = min(groups, key=lambda item: (-groups[item][0], groups[item][2], item))
+    ceiling, count, _first = groups[name]
+    return {
+        "name": name,
+        "ceiling_ns": ceiling,
+        "instances": count,
+        "source": None,
+    }, ceiling
+
+
+def _allows_rewrite(ceiling, step_time):
+    return ceiling * REWRITE_DENOMINATOR >= step_time * REWRITE_NUMERATOR
+
+
+def _refused(window, busy, idle, reason):
+    return _ledger(window, busy, idle, reason, None, None, None, False, reason)
+
+
+def _ledger(window, busy, idle, assumption, longest, hottest, ceiling, allow, refused):
+    return {
+        "range": window.name,
+        "step_start_ns": window.start_ns,
+        "step_end_ns": window.end_ns,
+        "step_time_ns": window.end_ns - window.start_ns,
+        "gpu_busy_ns": busy,
+        "gpu_idle_ns": idle,
+        "assumption": assumption,
+        "longest_blocker": longest,
+        "hottest_kernel": hottest,
+        "ceiling_ns": ceiling,
+        "allow_rewrite": allow,
+        "ceiling_refused": refused,
+        "rewrite_threshold_numerator": REWRITE_NUMERATOR,
+        "rewrite_threshold_denominator": REWRITE_DENOMINATOR,
+    }
