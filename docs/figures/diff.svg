@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 320" role="img">
+  <title>The same step after the synchronize shrinks</title>
+  <desc>The step goes from 1000 ns to 200 ns. pressure stays 80 ns. The synchronize still blocks more of the step than the kernel does. faster is true.</desc>
+  <rect width="960" height="320" rx="16" fill="#f4f6f8"/>
+  <text x="48" y="48" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="650">Same kernel. Shorter step.</text>
+  <text x="48" y="76" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15">800 ns shorter, so faster is true. The synchronize is still the blocker.</text>
+  <text x="48" y="124" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">before</text>
+  <rect x="140" y="104" width="56" height="32" rx="4" fill="#1d4ed8"/>
+  <rect x="196" y="104" width="644" height="32" rx="4" fill="#c2410c"/>
+  <text x="518" y="125" fill="#ffffff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="650" text-anchor="middle">synchronize, 920 ns</text>
+  <text x="48" y="184" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">after</text>
+  <rect x="140" y="164" width="56" height="32" rx="4" fill="#1d4ed8"/>
+  <rect x="196" y="164" width="84" height="32" rx="4" fill="#c2410c"/>
+  <text x="238" y="185" fill="#ffffff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="650" text-anchor="middle">120 ns</text>
+  <path d="M140 220 H840" stroke="#94a3b8" stroke-width="1.5"/>
+  <path d="M140 216 V224" stroke="#94a3b8" stroke-width="1.5"/>
+  <path d="M196 216 V224" stroke="#1d4ed8" stroke-width="1.5"/>
+  <path d="M280 216 V224" stroke="#c2410c" stroke-width="1.5"/>
+  <path d="M840 216 V224" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="140" y="244" fill="#5c6b7a" font-family="ui-monospace, monospace" font-size="12">0</text>
+  <text x="196" y="244" fill="#1d4ed8" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">80</text>
+  <text x="280" y="244" fill="#c2410c" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">200</text>
+  <text x="840" y="244" fill="#5c6b7a" font-family="ui-monospace, monospace" font-size="12" text-anchor="end">1000 ns</text>
+  <rect x="48" y="264" width="864" height="36" rx="8" fill="#ffffff" stroke="#d8dee6"/>
+  <text x="64" y="287" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">faster: true. pressure is still 80 ns, so it is still not the longest blocker.</text>
+</svg>

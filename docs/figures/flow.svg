@@ -1,21 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 200" role="img">
-  <title>stepceil turns one Nsight Systems step into a ledger</title>
-  <desc>A sqlite export of one NVTX range goes through stepceil and comes out as the longest blocker, the kernel ceiling, and allow_rewrite.</desc>
-  <rect width="960" height="200" rx="16" fill="#f4f6f8"/>
-  <rect x="36" y="40" width="250" height="120" rx="12" fill="#ffffff" stroke="#d8dee6"/>
-  <text x="56" y="74" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">Nsight Systems</text>
-  <text x="56" y="104" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">one NVTX range</text>
-  <text x="56" y="132" fill="#1d4ed8" font-family="ui-monospace, monospace" font-size="14">report.sqlite</text>
-  <path d="M302 100 H328" stroke="#94a3b8" stroke-width="2"/>
-  <path d="M322 94 L334 100 L322 106" fill="#94a3b8"/>
-  <rect x="346" y="40" width="230" height="120" rx="12" fill="#ffffff" stroke="#d8dee6"/>
-  <text x="366" y="74" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">stepceil</text>
-  <text x="366" y="104" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">clip the step</text>
-  <text x="366" y="128" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">withhold overlap</text>
-  <path d="M592 100 H618" stroke="#94a3b8" stroke-width="2"/>
-  <path d="M612 94 L624 100 L612 106" fill="#94a3b8"/>
-  <rect x="636" y="40" width="288" height="120" rx="12" fill="#ffffff" stroke="#d8dee6"/>
-  <text x="656" y="74" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">ledger</text>
-  <text x="656" y="104" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">longest blocker</text>
-  <text x="656" y="128" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">kernel ceiling, allow_rewrite</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" role="img">
+  <title>The hot kernel is 80 ns of a 1000 ns step</title>
+  <desc>pressure runs for 80 ns. The context synchronize blocks the other 920 ns. allow_rewrite is false.</desc>
+  <rect width="960" height="360" rx="16" fill="#f4f6f8"/>
+  <text x="48" y="52" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="650">The hot kernel is not the step</text>
+  <text x="48" y="80" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15">pressure runs 80 ns. The synchronize blocks the other 920 ns.</text>
+  <rect x="48" y="112" width="64" height="44" rx="6" fill="#1d4ed8"/>
+  <rect x="112" y="112" width="736" height="44" rx="6" fill="#c2410c"/>
+  <text x="480" y="140" fill="#ffffff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650" text-anchor="middle">context synchronize, 920 ns</text>
+  <text x="48" y="176" fill="#1d4ed8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="650">pressure</text>
+  <text x="848" y="176" fill="#5c6b7a" font-family="ui-monospace, monospace" font-size="13" text-anchor="end">1000 ns</text>
+  <text x="48" y="248" fill="#c2410c" font-family="ui-sans-serif, system-ui, sans-serif" font-size="36" font-weight="650">920 ns</text>
+  <text x="48" y="276" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">longest blocker</text>
+  <text x="48" y="298" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15">context synchronize</text>
+  <text x="360" y="248" fill="#1d4ed8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="36" font-weight="650">80 ns</text>
+  <text x="360" y="276" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">kernel ceiling</text>
+  <text x="360" y="298" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15">pressure</text>
+  <text x="640" y="248" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="36" font-weight="650">false</text>
+  <text x="640" y="276" fill="#5c6b7a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">allow_rewrite</text>
+  <text x="640" y="298" fill="#1a2332" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15">under 10% of the step</text>
 </svg>

@@ -2,15 +2,34 @@
 
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![MCP tool step_ceiling](https://img.shields.io/badge/MCP-step__ceiling-5c4ee5?style=flat-square)](#mcp)
+[![MCP](https://img.shields.io/badge/MCP-stdio-5c4ee5?style=flat-square)](#mcp)
 
 **Speedup ceiling of one GPU step: time left if its hottest kernel cost nothing.**
 
-Give stepceil one [Nsight Systems](https://developer.nvidia.com/nsight-systems) sqlite export of one NVTX range. It names the single place that blocked that step, and how much of the step the hottest kernel can still save. The command, the MCP tool, and `skill/SKILL.md` all read this same ledger. The skill does not recompute it.
+Give stepceil one [Nsight Systems](https://developer.nvidia.com/nsight-systems) sqlite export of one NVTX range. It names the single place that blocked that step, and how much of the step the hottest kernel can still save. The command, the MCP tools, and `skill/SKILL.md` all read this same ledger. The skill does not recompute it.
 
-![One sqlite export goes in. stepceil returns the longest blocker, the kernel ceiling, and allow_rewrite.](docs/figures/flow.svg)
+![pressure is 80 ns of a 1000 ns step. The synchronize blocks 920 ns, so allow_rewrite is false.](docs/figures/flow.svg)
+
+[Try it](#quick-start) · [The hot kernel](#the-hot-kernel-is-not-always-the-step) · [Overlap](#overlap-is-not-a-bigger-ceiling) · [Compare](#compare-two-captures) · [Agent](#agent) · [MCP](#mcp)
 
 ## Quick start
+
+The repository includes four small exports, so this needs no GPU. Python 3.10 or newer. The program uses the standard library only.
+
+```bash
+git clone https://github.com/Tes-bo/stepceil.git
+cd stepceil
+python3 -m pip install .
+stepceil examples/sync.sqlite --range step
+```
+
+From a checkout before install:
+
+```bash
+PYTHONPATH=src python3 -m stepceil examples/sync.sqlite --range step
+```
+
+On your own program, mark one iteration and export sqlite. `.nsys-rep` is not opened.
 
 ```bash
 nsys profile --trace=cuda,nvtx -o report ./app
@@ -18,20 +37,20 @@ nsys export --type sqlite -o report.sqlite report.nsys-rep
 stepceil report.sqlite --range step
 ```
 
-`--json` prints the ledger an agent should read. From a checkout before `pip install .`:
-
-```bash
-PYTHONPATH=src python3 -m stepceil report.sqlite --range step --json
+```c
+nvtxRangePushA("step");
+/* one iteration */
+nvtxRangePop();
 ```
 
-The range name must occur once. Push/pop (NVTX type 59) and start/end (type 60) count. Marks do not. The match is exact.
+`--json` prints the ledger an agent should read. The range name must occur once. Push/pop (NVTX type 59) and start/end (type 60) count. Marks do not. The match is exact.
 
 ## Which name marks the step
 
 List the names before choosing one. A name can be accounted only when `count` is 1 and `closed` is 1. `closed` is how many of those events have an end timestamp after the start. This command does not pick a window.
 
 ```bash
-stepceil ranges report.sqlite --json
+stepceil ranges examples/names.sqlite
 ```
 
 ```text
@@ -46,19 +65,13 @@ closed: 1
 
 The MCP tool `step_ranges` takes `path` and returns that list as JSON.
 
-```c
-nvtxRangePushA("step");
-/* one iteration */
-nvtxRangePop();
-```
-
-Python 3.10 or newer. The program uses the standard library only.
-
 ## The hot kernel is not always the step
 
 `pressure` runs for the first 80 ns of a 1000 ns step. `cudaDeviceSynchronize` covers the whole step, so the other 920 ns is that synchronize sitting on idle GPU time. Deleting `pressure` saves at most 80 ns. That is under 10% of the step, so `allow_rewrite` is false. The blocking piece of the synchronize starts at 80 ns, not at the start of the call.
 
 ![pressure is an 80 ns slice. The context synchronize blocks the other 920 ns, so the ceiling is under 10 percent.](docs/figures/sync-ceiling.svg)
+
+`examples/sync.sqlite` is this step.
 
 ```text
 range: step
@@ -122,6 +135,8 @@ rewrite_threshold_denominator: 10
 
 ![Two 60 ns kernels overlap, so their sum is 120 ns and the union is 100 ns. The ceiling is withheld.](docs/figures/overlap-withheld.svg)
 
+`examples/overlap.sqlite` is this step.
+
 ```text
 range: step
 step_start_ns: 0
@@ -147,6 +162,46 @@ rewrite_threshold_numerator: 1
 rewrite_threshold_denominator: 10
 ```
 
+## Compare two captures
+
+After a change, export the same NVTX range again. `faster` is true only when the later step is strictly shorter. A withheld ceiling still has a step time, so the comparison stands.
+
+`examples/after.sqlite` is the same kernel with the synchronize cut from 1000 ns to 200 ns. The step is 800 ns shorter. `pressure` is still 80 ns, which is now at least 10% of the shorter step, so `allow_rewrite` becomes true. The synchronize still blocks the other 120 ns, so the kernel is still not the longest blocker.
+
+![The step shrinks from 1000 ns to 200 ns. pressure stays 80 ns, and the synchronize is still the longest blocker.](docs/figures/diff.svg)
+
+```bash
+stepceil diff examples/sync.sqlite examples/after.sqlite --range step
+```
+
+```text
+range: step
+before_step_time_ns: 1000
+after_step_time_ns: 200
+step_time_ns_delta: -800
+faster: true
+before_longest_blocker.kind: sync
+before_longest_blocker.name: context synchronize
+before_longest_blocker.start_ns: 80
+before_longest_blocker.end_ns: 1000
+before_longest_blocker.blocking_ns: 920
+before_longest_blocker.source: none
+after_longest_blocker.kind: sync
+after_longest_blocker.name: context synchronize
+after_longest_blocker.start_ns: 80
+after_longest_blocker.end_ns: 200
+after_longest_blocker.blocking_ns: 120
+after_longest_blocker.source: none
+before_ceiling_ns: 80
+after_ceiling_ns: 80
+before_allow_rewrite: false
+after_allow_rewrite: true
+before_ceiling_refused: none
+after_ceiling_refused: none
+```
+
+The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that same JSON.
+
 ## What the numbers mean
 
 Device intervals are clipped to the NVTX range first. `gpu_busy_ns` is the length of the union of clipped kernel, memcpy, and memset intervals. `gpu_idle_ns` is `step_time_ns - gpu_busy_ns`.
@@ -166,8 +221,6 @@ Times are nanoseconds. `source` is null. These sqlite tables do not carry a file
 
 ## Input
 
-`.nsys-rep` is not opened. Export sqlite first.
-
 | Table | Required | Role |
 | --- | --- | --- |
 | `NVTX_EVENTS` | yes | the step window |
@@ -182,16 +235,6 @@ Kernel names come from `shortName`, then `demangledName`, then `mangledName`. NV
 Memcpy and synchronization names come from `ENUM_CUDA_MEMCPY_OPER` and `ENUM_CUPTI_SYNC_TYPE` when those tables are in the export. Nsight Systems 2022.4 numbers memcpy kinds differently from older CUPTI headers, so the file's label wins. Exports without those tables keep stepceil's short names, such as `memcpy HtoD` and `context synchronize`.
 
 More than one `deviceId` inside the step exits 2 and prints no ledger.
-
-## Compare two captures
-
-After a change, export the same NVTX range again. `faster` is true only when the later step is strictly shorter. A withheld ceiling still has a step time, so the comparison stands.
-
-```bash
-stepceil diff before.sqlite after.sqlite --range step --json
-```
-
-The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that same JSON.
 
 ## Agent
 
@@ -217,6 +260,8 @@ The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that s
 }
 ```
 
+Cursor, and any other client that launches a stdio MCP server, uses that block.
+
 ## What this version does not do
 
 - It does not profile or rewrite kernels.
@@ -236,6 +281,7 @@ The refusal line goes to stderr and starts with `stepceil:`.
 ## Develop
 
 ```bash
+python3 examples/build_examples.py
 python3 -m unittest discover -s tests -v
 ```
 

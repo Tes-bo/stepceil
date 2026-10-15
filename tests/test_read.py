@@ -4,10 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from stepceil.diff import compare_ledgers
 from stepceil.errors import StepceilError
+from stepceil.format import render_diff_text, render_ranges_text, render_text
 from stepceil.ledger import account
 from stepceil.model import DeviceOp, StepWindow, SyncOp
 from stepceil.nsys import list_ranges, load_path
+from _path import ROOT
 from support import write_export
 
 
@@ -206,6 +209,21 @@ class ReadTest(unittest.TestCase):
             ledger = account(load_path(path, "step"))
             self.assertEqual(ledger["longest_blocker"]["name"], "memcpy Host-to-Array")
             self.assertNotIn("HtoH", ledger["longest_blocker"]["name"])
+
+    def test_readme_examples_are_the_exports_in_the_repository(self):
+        readme = (ROOT / "README.md").read_text()
+        examples = ROOT / "examples"
+        sync = account(load_path(examples / "sync.sqlite", "step"))
+        overlap = account(load_path(examples / "overlap.sqlite", "step"))
+        after = account(load_path(examples / "after.sqlite", "step"))
+        diff = compare_ledgers(sync, after)
+        self.assertIn(render_text(sync), readme)
+        self.assertIn(render_text(overlap), readme)
+        self.assertIn(render_diff_text(diff), readme)
+        self.assertIn(render_ranges_text(list_ranges(examples / "names.sqlite")), readme)
+        self.assertTrue(diff["faster"])
+        self.assertEqual(diff["step_time_ns_delta"], -800)
+        self.assertEqual(diff["after_longest_blocker"]["kind"], "sync")
 
 
 if __name__ == "__main__":
