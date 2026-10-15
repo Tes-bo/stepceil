@@ -1,7 +1,7 @@
 """Minimal MCP stdio server for the stepceil ledger.
 
-step_ceiling and step_diff call the same functions as the command line.
-They do not compute a second ceiling.
+step_ceiling, step_diff, and step_ranges call the same functions as the
+command line. They do not compute a second ceiling.
 """
 
 import json
@@ -13,7 +13,7 @@ from stepceil.errors import StepceilError
 from stepceil.diff import compare_ledgers
 from stepceil.format import render_json
 from stepceil.ledger import account
-from stepceil.nsys import load_path
+from stepceil.nsys import list_ranges, load_path
 
 SUPPORTED_PROTOCOLS = (
     "2024-11-05",
@@ -44,6 +44,26 @@ TOOL = {
             },
         },
         "required": ["path", "range"],
+        "additionalProperties": False,
+    },
+}
+
+RANGES_TOOL = {
+    "name": "step_ranges",
+    "description": (
+        "List NVTX range names in an nsys sqlite export. Account a name "
+        "only when count is 1 and closed is 1. Do not guess a range name "
+        "or replace a missing range with a start and end time."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to an nsys sqlite export.",
+            },
+        },
+        "required": ["path"],
         "additionalProperties": False,
     },
 }
@@ -119,7 +139,7 @@ def _handle(message):
         return {
             "jsonrpc": "2.0",
             "id": msg_id,
-            "result": {"tools": [TOOL, DIFF_TOOL]},
+            "result": {"tools": [TOOL, DIFF_TOOL, RANGES_TOOL]},
         }
     if method == "tools/call":
         return _call(msg_id, message.get("params") or {})
@@ -133,6 +153,8 @@ def _call(msg_id, params):
         return _ceiling_call(msg_id, arguments)
     if name == DIFF_TOOL["name"]:
         return _diff_call(msg_id, arguments)
+    if name == RANGES_TOOL["name"]:
+        return _ranges_call(msg_id, arguments)
     return _tool_result(msg_id, f"unknown tool: {name}", True)
 
 
@@ -146,6 +168,17 @@ def _ceiling_call(msg_id, arguments):
     except StepceilError as exc:
         return _tool_result(msg_id, str(exc), True)
     return _tool_result(msg_id, render_json(ledger), False)
+
+
+def _ranges_call(msg_id, arguments):
+    path = arguments.get("path")
+    if not isinstance(path, str):
+        return _tool_result(msg_id, "path must be a string", True)
+    try:
+        report = list_ranges(Path(path))
+    except StepceilError as exc:
+        return _tool_result(msg_id, str(exc), True)
+    return _tool_result(msg_id, render_json(report), False)
 
 
 def _diff_call(msg_id, arguments):

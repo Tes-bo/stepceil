@@ -202,6 +202,57 @@ class CliTest(unittest.TestCase):
             self.assertIn("faster: true", text.stdout)
             self.assertIn("step_time_ns_delta: -800", text.stdout)
 
+    def test_ranges_lists_names_without_choosing_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(path, [
+                {"text": "step", "start": 0, "end": 10},
+                {"text": "inner", "start": 0, "end": 4},
+                {"text": "inner", "start": 4, "end": 8},
+                {"text": "inner", "start": 8, "end": None},
+                {"text": "flat", "start": 5, "end": 5},
+                {"text": "step", "start": 0, "end": 10, "event_type": 34},
+            ])
+            result = run_cli("ranges", str(path), "--json")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["ranges"], [
+                {"name": "flat", "count": 1, "closed": 0},
+                {"name": "inner", "count": 3, "closed": 2},
+                {"name": "step", "count": 1, "closed": 1},
+            ])
+            text = run_cli("ranges", str(path))
+            self.assertIn("ranges: 3", text.stdout)
+            self.assertIn("name: step\ncount: 1\nclosed: 1", text.stdout)
+            missing = run_cli("ranges", str(Path(tmp) / "missing.sqlite"))
+            self.assertEqual(missing.returncode, 2)
+            self.assertTrue(missing.stderr.startswith("stepceil:"))
+            empty = Path(tmp) / "empty.sqlite"
+            write_export(empty, [])
+            listed = json.loads(run_cli("ranges", str(empty), "--json").stdout)
+            self.assertEqual(listed["ranges"], [])
+            incoming = frame({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "step_ranges",
+                    "arguments": {"path": str(path)},
+                },
+            })
+            stdout = tempfile.TemporaryFile()
+            try:
+                serve(stdin=_Bytes(incoming), stdout=stdout)
+                stdout.seek(0)
+                message = frames(stdout.read())[0]
+            finally:
+                stdout.close()
+            self.assertFalse(message["result"]["isError"])
+            self.assertEqual(
+                json.loads(message["result"]["content"][0]["text"]),
+                report,
+            )
+
 
 class _Bytes:
     def __init__(self, blob):

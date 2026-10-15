@@ -26,6 +26,26 @@ PYTHONPATH=src python3 -m stepceil report.sqlite --range step --json
 
 The range name must occur once. Push/pop (NVTX type 59) and start/end (type 60) count. Marks do not. The match is exact.
 
+## Which name marks the step
+
+List the names before choosing one. A name can be accounted only when `count` is 1 and `closed` is 1. `closed` is how many of those events have an end timestamp after the start. This command does not pick a window.
+
+```bash
+stepceil ranges report.sqlite --json
+```
+
+```text
+ranges: 2
+name: inner
+count: 4
+closed: 4
+name: step
+count: 1
+closed: 1
+```
+
+The MCP tool `step_ranges` takes `path` and returns that list as JSON.
+
 ```c
 nvtxRangePushA("step");
 /* one iteration */
@@ -180,11 +200,11 @@ The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that s
 - Change `longest_blocker` first.
 - Rewrite the hottest kernel only when `allow_rewrite` is true and that kernel is the longest blocker.
 - When `ceiling_refused` is not null, do not rewrite kernels from that report.
-- After a change, capture the same range again and show both ledgers. Do not claim the step got faster without the second report.
+- After a change, run `stepceil diff` on the two exports. Do not claim the step got faster unless `faster` is true.
 
 ## MCP
 
-`stepceil mcp` speaks [MCP](https://modelcontextprotocol.io) on stdin and stdout. One tool, `step_ceiling`, takes `path` and `range`. It returns the `--json` ledger. A refused report is a tool error.
+`stepceil mcp` speaks [MCP](https://modelcontextprotocol.io) on stdin and stdout. `step_ceiling` takes `path` and `range` and returns the `--json` ledger. `step_diff` compares two exports. `step_ranges` lists range names. A refused report is a tool error.
 
 ```json
 {
@@ -199,7 +219,7 @@ The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that s
 
 ## What this version does not do
 
-- It does not profile, rewrite kernels, or compare two reports.
+- It does not profile or rewrite kernels.
 - It does not report occupancy or memory throughput.
 - It does not account more than one GPU.
 - It does not invent a ceiling for overlapping device work.

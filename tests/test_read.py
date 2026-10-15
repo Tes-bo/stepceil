@@ -7,7 +7,7 @@ from pathlib import Path
 from stepceil.errors import StepceilError
 from stepceil.ledger import account
 from stepceil.model import DeviceOp, StepWindow, SyncOp
-from stepceil.nsys import load_path
+from stepceil.nsys import list_ranges, load_path
 from support import write_export
 
 
@@ -112,6 +112,13 @@ class ReadTest(unittest.TestCase):
             write_export(open_ended, [{"text": "step", "start": 0, "end": None}])
             with self.assertRaisesRegex(StepceilError, "no end timestamp"):
                 load_path(open_ended, "step")
+            listed = list_ranges(two)
+            self.assertEqual(listed["ranges"], [
+                {"name": "step", "count": 2, "closed": 1},
+            ])
+            self.assertEqual(list_ranges(open_ended)["ranges"], [
+                {"name": "step", "count": 1, "closed": 0},
+            ])
 
     def test_demangled_name_is_used_when_short_name_is_absent(self):
         with tempfile.TemporaryDirectory() as tmp:

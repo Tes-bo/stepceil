@@ -41,9 +41,44 @@ KERNEL_NAME_COLUMNS = ("shortName", "demangledName", "mangledName")
 
 
 def load_path(path, range_name):
-    path = Path(path)
     if range_name == "":
         raise StepceilError("empty range name")
+    connection = _open(path)
+    try:
+        return _load(connection, range_name)
+    finally:
+        connection.close()
+
+
+def list_ranges(path):
+    """NVTX range names in this export.
+
+    The accountant accepts a name only when it occurs once and is closed.
+    This list uses those same events. It does not choose a window.
+    """
+    connection = _open(path)
+    try:
+        counts = {}
+        closed = {}
+        for name, start, end in _nvtx_events(connection):
+            counts[name] = counts.get(name, 0) + 1
+            closed[name] = closed.get(name, 0) + (1 if _closed(start, end) else 0)
+        return {
+            "ranges": [
+                {
+                    "name": name,
+                    "count": counts[name],
+                    "closed": closed[name],
+                }
+                for name in sorted(counts)
+            ]
+        }
+    finally:
+        connection.close()
+
+
+def _open(path):
+    path = Path(path)
     if not path.is_file():
         raise StepceilError(f"no such file: {path}")
     uri = path.resolve().as_uri() + "?mode=ro"
@@ -51,55 +86,37 @@ def load_path(path, range_name):
         connection = sqlite3.connect(uri, uri=True)
     except sqlite3.Error as exc:
         raise StepceilError(f"not an nsys sqlite export: {path}") from exc
+    connection.row_factory = sqlite3.Row
     try:
-        connection.row_factory = sqlite3.Row
-        try:
-            connection.execute("SELECT name FROM sqlite_master LIMIT 1")
-        except sqlite3.DatabaseError as exc:
-            raise StepceilError(f"not an nsys sqlite export: {path}") from exc
-        return _load(connection, range_name)
-    finally:
+        connection.execute("SELECT name FROM sqlite_master LIMIT 1")
+    except sqlite3.DatabaseError as exc:
         connection.close()
+        raise StepceilError(f"not an nsys sqlite export: {path}") from exc
+    return connection
 
 
 def _load(connection, range_name):
-    _require_table(connection, "NVTX_EVENTS")
-    _require_columns(connection, "NVTX_EVENTS", ("start", "end", "eventType"))
-    columns = _columns(connection, "NVTX_EVENTS")
-    has_text = "text" in columns
-    has_text_id = "textId" in columns
-    if not has_text and not has_text_id:
-        raise StepceilError("NVTX_EVENTS has no text or textId column")
-    strings = _string_ids(connection)
-
-    selected = ["start", "end", "eventType"]
-    if has_text:
-        selected.append("text")
-    if has_text_id:
-        selected.append("textId")
-    query = (
-        f"SELECT {', '.join(selected)} FROM NVTX_EVENTS "
-        "WHERE eventType IN (?, ?)"
-    )
-    matches = []
-    for row in connection.execute(query, (NVTX_PUSH_POP, NVTX_START_END)):
-        if _range_text(row, has_text, has_text_id, strings) == range_name:
-            matches.append(row)
+    matches = [
+        (start, end)
+        for name, start, end in _nvtx_events(connection)
+        if name == range_name
+    ]
     if len(matches) != 1:
         raise StepceilError(
             f"expected one NVTX range named {range_name!r}, found {len(matches)}"
         )
-    row = matches[0]
-    if row["end"] is None:
+    start, end = matches[0]
+    if end is None:
         raise StepceilError(f"NVTX range {range_name!r} has no end timestamp")
-    start_ns = int(row["start"])
-    end_ns = int(row["end"])
+    start_ns = int(start)
+    end_ns = int(end)
     if end_ns <= start_ns:
         raise StepceilError(
             f"NVTX range {range_name!r} ends at or before it starts"
         )
 
     device_ops = []
+    strings = _string_ids(connection)
     copy_labels = _enum_labels(connection, "ENUM_CUDA_MEMCPY_OPER")
     sync_labels = _enum_labels(connection, "ENUM_CUPTI_SYNC_TYPE")
     device_ops.extend(_kernels(connection, strings, start_ns, end_ns))
@@ -113,6 +130,40 @@ def _load(connection, range_name):
         device_ops=tuple(device_ops),
         syncs=tuple(syncs),
     )
+
+
+def _nvtx_events(connection):
+    _require_table(connection, "NVTX_EVENTS")
+    _require_columns(connection, "NVTX_EVENTS", ("start", "end", "eventType"))
+    columns = _columns(connection, "NVTX_EVENTS")
+    has_text = "text" in columns
+    has_text_id = "textId" in columns
+    if not has_text and not has_text_id:
+        raise StepceilError("NVTX_EVENTS has no text or textId column")
+    strings = _string_ids(connection)
+    selected = ["start", "end", "eventType"]
+    if has_text:
+        selected.append("text")
+    if has_text_id:
+        selected.append("textId")
+    query = (
+        f"SELECT {', '.join(selected)} FROM NVTX_EVENTS "
+        "WHERE eventType IN (?, ?)"
+    )
+    events = []
+    for row in connection.execute(query, (NVTX_PUSH_POP, NVTX_START_END)):
+        events.append((
+            _range_text(row, has_text, has_text_id, strings),
+            row["start"],
+            row["end"],
+        ))
+    return events
+
+
+def _closed(start, end):
+    if start is None or end is None:
+        return False
+    return int(end) > int(start)
 
 
 def _range_text(row, has_text, has_text_id, strings):

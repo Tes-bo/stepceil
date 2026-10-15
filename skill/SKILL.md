@@ -3,19 +3,28 @@ name: stepceil
 description: >
   Account one GPU step from an Nsight Systems sqlite export before changing
   a CUDA kernel. Use when a profile should say how much of the step the
-  hottest kernel can still save, or when an agent is about to rewrite a
-  kernel to make a step faster.
+  hottest kernel can still save, when the NVTX range name in an export is
+  not known, or when an agent is about to rewrite a kernel to make a step
+  faster.
 ---
 
 # stepceil
 
 Run stepceil on one Nsight Systems sqlite export. Do not estimate the ceiling yourself.
 
+If the range name is not already known, list the names in the export first. Do not guess one, and do not replace a missing range with a start and end time.
+
+```
+stepceil ranges REPORT.sqlite --json
+```
+
+`step_ranges` is that list when MCP is connected. Pass `path`. Account a name only when `count` is 1 and `closed` is 1.
+
 ```
 stepceil REPORT.sqlite --range STEP --json
 ```
 
-`STEP` is the NVTX range name, and it must occur once. `REPORT.sqlite` is the file from `nsys export --type sqlite`, not a `.nsys-rep`.
+`STEP` is that NVTX range name. `REPORT.sqlite` is the file from `nsys export --type sqlite`, not a `.nsys-rep`.
 
 If the `step_ceiling` MCP tool is connected, call it with `path` and `range`. It returns this same JSON.
 

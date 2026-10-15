@@ -7,9 +7,14 @@ from pathlib import Path
 from stepceil import VERSION
 from stepceil.errors import StepceilError
 from stepceil.diff import compare_ledgers
-from stepceil.format import render_diff_text, render_json, render_text
+from stepceil.format import (
+    render_diff_text,
+    render_json,
+    render_ranges_text,
+    render_text,
+)
 from stepceil.ledger import account
-from stepceil.nsys import load_path
+from stepceil.nsys import list_ranges, load_path
 
 
 def main(argv=None):
@@ -23,6 +28,8 @@ def main(argv=None):
         return serve()
     if argv[:1] == ["diff"]:
         return _diff(argv[1:])
+    if argv[:1] == ["ranges"]:
+        return _ranges(argv[1:])
 
     parser = argparse.ArgumentParser(
         prog="stepceil",
@@ -53,6 +60,28 @@ def main(argv=None):
         sys.stderr.write(f"stepceil: {exc}\n")
         return 2
     text = render_json(ledger) if args.json else render_text(ledger)
+    sys.stdout.write(text)
+    return 0
+
+
+def _ranges(argv):
+    parser = argparse.ArgumentParser(
+        prog="stepceil ranges",
+        description="List NVTX range names in an nsys sqlite export.",
+    )
+    parser.add_argument("sqlite", help="path to an nsys sqlite export")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print the range list as JSON",
+    )
+    args = parser.parse_args(argv)
+    try:
+        report = list_ranges(Path(args.sqlite))
+    except StepceilError as exc:
+        sys.stderr.write(f"stepceil: {exc}\n")
+        return 2
+    text = render_json(report) if args.json else render_ranges_text(report)
     sys.stdout.write(text)
     return 0
 

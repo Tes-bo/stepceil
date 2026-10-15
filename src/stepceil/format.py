@@ -3,6 +3,15 @@
 import json
 
 
+def render_ranges_text(report):
+    lines = [f"ranges: {len(report['ranges'])}"]
+    for item in report["ranges"]:
+        lines.append(f"name: {item['name']}")
+        lines.append(f"count: {item['count']}")
+        lines.append(f"closed: {item['closed']}")
+    return "\n".join(lines) + "\n"
+
+
 def render_json(ledger):
     return json.dumps(ledger, indent=2, ensure_ascii=False) + "\n"
 
