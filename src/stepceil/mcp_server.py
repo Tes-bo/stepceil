@@ -1,7 +1,7 @@
-"""Minimal MCP stdio server with one tool, step_ceiling.
+"""Minimal MCP stdio server for the stepceil ledger.
 
-The tool calls the same account function as the command line. It does not
-compute a second ceiling.
+step_ceiling and step_diff call the same functions as the command line.
+They do not compute a second ceiling.
 """
 
 import json
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from stepceil import VERSION
 from stepceil.errors import StepceilError
+from stepceil.diff import compare_ledgers
 from stepceil.format import render_json
 from stepceil.ledger import account
 from stepceil.nsys import load_path
@@ -43,6 +44,34 @@ TOOL = {
             },
         },
         "required": ["path", "range"],
+        "additionalProperties": False,
+    },
+}
+
+DIFF_TOOL = {
+    "name": "step_diff",
+    "description": (
+        "Compare two nsys sqlite exports of the same NVTX range. "
+        "faster is true only when the later step is strictly shorter. "
+        "Do not claim a speedup unless faster is true."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "before": {
+                "type": "string",
+                "description": "Path to the earlier nsys sqlite export.",
+            },
+            "after": {
+                "type": "string",
+                "description": "Path to the later nsys sqlite export.",
+            },
+            "range": {
+                "type": "string",
+                "description": "NVTX range name that marks the one step.",
+            },
+        },
+        "required": ["before", "after", "range"],
         "additionalProperties": False,
     },
 }
@@ -87,16 +116,27 @@ def _handle(message):
     if method == "ping":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": [TOOL]}}
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {"tools": [TOOL, DIFF_TOOL]},
+        }
     if method == "tools/call":
         return _call(msg_id, message.get("params") or {})
     return _error(msg_id, -32601, f"unknown method: {method}")
 
 
 def _call(msg_id, params):
-    if params.get("name") != TOOL["name"]:
-        return _tool_result(msg_id, f"unknown tool: {params.get('name')}", True)
+    name = params.get("name")
     arguments = params.get("arguments") or {}
+    if name == TOOL["name"]:
+        return _ceiling_call(msg_id, arguments)
+    if name == DIFF_TOOL["name"]:
+        return _diff_call(msg_id, arguments)
+    return _tool_result(msg_id, f"unknown tool: {name}", True)
+
+
+def _ceiling_call(msg_id, arguments):
     path = arguments.get("path")
     range_name = arguments.get("range")
     if not isinstance(path, str) or not isinstance(range_name, str):
@@ -106,6 +146,28 @@ def _call(msg_id, params):
     except StepceilError as exc:
         return _tool_result(msg_id, str(exc), True)
     return _tool_result(msg_id, render_json(ledger), False)
+
+
+def _diff_call(msg_id, arguments):
+    before = arguments.get("before")
+    after = arguments.get("after")
+    range_name = arguments.get("range")
+    if (
+        not isinstance(before, str)
+        or not isinstance(after, str)
+        or not isinstance(range_name, str)
+    ):
+        return _tool_result(
+            msg_id, "before, after, and range must be strings", True
+        )
+    try:
+        report = compare_ledgers(
+            account(load_path(Path(before), range_name)),
+            account(load_path(Path(after), range_name)),
+        )
+    except StepceilError as exc:
+        return _tool_result(msg_id, str(exc), True)
+    return _tool_result(msg_id, render_json(report), False)
 
 
 def _tool_result(msg_id, text, is_error):

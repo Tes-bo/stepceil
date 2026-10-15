@@ -163,6 +163,43 @@ class ReadTest(unittest.TestCase):
             with self.assertRaisesRegex(StepceilError, "empty range name"):
                 load_path(junk, "")
 
+    def test_export_enum_labels_override_the_builtin_copy_kinds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(
+                path,
+                [{"text": "step", "start": 0, "end": 40}],
+                copies=[{"start": 0, "end": 40, "copy_kind": 3}],
+                syncs=[{"sync_type": 4, "start": 0, "end": 40}],
+            )
+            connection = sqlite3.connect(path)
+            connection.execute(
+                """
+                CREATE TABLE ENUM_CUDA_MEMCPY_OPER (
+                    id INTEGER, name TEXT, label TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE ENUM_CUPTI_SYNC_TYPE (
+                    id INTEGER, name TEXT, label TEXT
+                )
+                """
+            )
+            # Kind 3 is HtoH in older CUPTI headers. This export says otherwise.
+            connection.execute(
+                "INSERT INTO ENUM_CUDA_MEMCPY_OPER VALUES (3, 'X', 'Host-to-Array')"
+            )
+            connection.execute(
+                "INSERT INTO ENUM_CUPTI_SYNC_TYPE VALUES (4, 'Y', 'Context sync')"
+            )
+            connection.commit()
+            connection.close()
+            ledger = account(load_path(path, "step"))
+            self.assertEqual(ledger["longest_blocker"]["name"], "memcpy Host-to-Array")
+            self.assertNotIn("HtoH", ledger["longest_blocker"]["name"])
+
 
 if __name__ == "__main__":
     unittest.main()

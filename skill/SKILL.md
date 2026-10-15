@@ -26,4 +26,10 @@ Obey the JSON:
 - When `allow_rewrite` is false, do not rewrite the hottest kernel. The program sets that flag when the ceiling is under 10% of the step (`ceiling_ns * 10 >= step_time_ns`).
 - When `ceiling_refused` is not null, do not rewrite any kernel from this report. Profile a step whose device work does not overlap, then run the program again.
 - `source` is null in this version. Do not invent a file and line.
-- After a change, capture the same NVTX range again and run the program again. Show both `step_time_ns` values and both longest blockers. Do not claim the step got faster without the second report.
+- After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
+
+```
+stepceil diff BEFORE.sqlite AFTER.sqlite --range STEP --json
+```
+
+`step_diff` is the same comparison when MCP is connected. Pass `before`, `after`, and `range`.

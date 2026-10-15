@@ -164,6 +164,44 @@ class CliTest(unittest.TestCase):
         self.assertTrue(message["result"]["isError"])
         self.assertIn("no such file", message["result"]["content"][0]["text"])
 
+    def test_diff_is_faster_only_when_the_step_shrinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            before = Path(tmp) / "before.sqlite"
+            after = Path(tmp) / "after.sqlite"
+            same = Path(tmp) / "same.sqlite"
+            write_export(
+                before,
+                [{"text": "step", "start": 0, "end": 1000}],
+                kernels=[{"name": "pressure", "start": 0, "end": 80}],
+                syncs=[{"sync_type": 4, "start": 0, "end": 1000}],
+            )
+            write_export(
+                after,
+                [{"text": "step", "start": 0, "end": 200}],
+                kernels=[{"name": "pressure", "start": 0, "end": 80}],
+                syncs=[{"sync_type": 4, "start": 0, "end": 200}],
+            )
+            write_export(
+                same,
+                [{"text": "step", "start": 0, "end": 1000}],
+                kernels=[{"name": "pressure", "start": 0, "end": 80}],
+            )
+            shorter = run_cli(
+                "diff", str(before), str(after), "--range", "step", "--json"
+            )
+            self.assertEqual(shorter.returncode, 0, shorter.stderr)
+            report = json.loads(shorter.stdout)
+            self.assertEqual(report["step_time_ns_delta"], -800)
+            self.assertTrue(report["faster"])
+            self.assertEqual(report["before_longest_blocker"]["kind"], "sync")
+            tied = run_cli(
+                "diff", str(before), str(same), "--range", "step", "--json"
+            )
+            self.assertFalse(json.loads(tied.stdout)["faster"])
+            text = run_cli("diff", str(before), str(after), "--range", "step")
+            self.assertIn("faster: true", text.stdout)
+            self.assertIn("step_time_ns_delta: -800", text.stdout)
+
 
 class _Bytes:
     def __init__(self, blob):

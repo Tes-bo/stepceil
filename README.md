@@ -159,7 +159,19 @@ Times are nanoseconds. `source` is null. These sqlite tables do not carry a file
 
 Kernel names come from `shortName`, then `demangledName`, then `mangledName`. NVTX text is the `text` column when it is non-empty, otherwise `StringIds` at `textId`.
 
+Memcpy and synchronization names come from `ENUM_CUDA_MEMCPY_OPER` and `ENUM_CUPTI_SYNC_TYPE` when those tables are in the export. Nsight Systems 2022.4 numbers memcpy kinds differently from older CUPTI headers, so the file's label wins. Exports without those tables keep stepceil's short names, such as `memcpy HtoD` and `context synchronize`.
+
 More than one `deviceId` inside the step exits 2 and prints no ledger.
+
+## Compare two captures
+
+After a change, export the same NVTX range again. `faster` is true only when the later step is strictly shorter. A withheld ceiling still has a step time, so the comparison stands.
+
+```bash
+stepceil diff before.sqlite after.sqlite --range step --json
+```
+
+The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that same JSON.
 
 ## Agent
 

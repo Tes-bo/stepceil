@@ -6,7 +6,8 @@ from pathlib import Path
 
 from stepceil import VERSION
 from stepceil.errors import StepceilError
-from stepceil.format import render_json, render_text
+from stepceil.diff import compare_ledgers
+from stepceil.format import render_diff_text, render_json, render_text
 from stepceil.ledger import account
 from stepceil.nsys import load_path
 
@@ -20,6 +21,8 @@ def main(argv=None):
             return 2
         from stepceil.mcp_server import serve
         return serve()
+    if argv[:1] == ["diff"]:
+        return _diff(argv[1:])
 
     parser = argparse.ArgumentParser(
         prog="stepceil",
@@ -50,5 +53,35 @@ def main(argv=None):
         sys.stderr.write(f"stepceil: {exc}\n")
         return 2
     text = render_json(ledger) if args.json else render_text(ledger)
+    sys.stdout.write(text)
+    return 0
+
+
+def _diff(argv):
+    parser = argparse.ArgumentParser(
+        prog="stepceil diff",
+        description="Compare two ledgers of the same NVTX range.",
+    )
+    parser.add_argument("before", help="nsys sqlite export from before the change")
+    parser.add_argument("after", help="nsys sqlite export from after the change")
+    parser.add_argument(
+        "--range",
+        required=True,
+        help="NVTX range name that marks the one step",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print the comparison as JSON",
+    )
+    args = parser.parse_args(argv)
+    try:
+        before = account(load_path(Path(args.before), args.range))
+        after = account(load_path(Path(args.after), args.range))
+        report = compare_ledgers(before, after)
+    except StepceilError as exc:
+        sys.stderr.write(f"stepceil: {exc}\n")
+        return 2
+    text = render_json(report) if args.json else render_diff_text(report)
     sys.stdout.write(text)
     return 0

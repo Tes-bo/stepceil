@@ -7,6 +7,37 @@ def render_json(ledger):
     return json.dumps(ledger, indent=2, ensure_ascii=False) + "\n"
 
 
+def render_diff_text(report):
+    lines = [
+        f"range: {report['range']}",
+        f"before_step_time_ns: {report['before_step_time_ns']}",
+        f"after_step_time_ns: {report['after_step_time_ns']}",
+        f"step_time_ns_delta: {report['step_time_ns_delta']}",
+        f"faster: {_cell(report['faster'])}",
+    ]
+    lines.extend(_object_lines(
+        "before_longest_blocker",
+        report["before_longest_blocker"],
+        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source"),
+    ))
+    lines.extend(_object_lines(
+        "after_longest_blocker",
+        report["after_longest_blocker"],
+        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source"),
+    ))
+    lines.append(f"before_ceiling_ns: {_cell(report['before_ceiling_ns'])}")
+    lines.append(f"after_ceiling_ns: {_cell(report['after_ceiling_ns'])}")
+    lines.append(f"before_allow_rewrite: {_cell(report['before_allow_rewrite'])}")
+    lines.append(f"after_allow_rewrite: {_cell(report['after_allow_rewrite'])}")
+    lines.append(
+        f"before_ceiling_refused: {_cell(report['before_ceiling_refused'])}"
+    )
+    lines.append(
+        f"after_ceiling_refused: {_cell(report['after_ceiling_refused'])}"
+    )
+    return "\n".join(lines) + "\n"
+
+
 def render_text(ledger):
     lines = [
         f"range: {ledger['range']}",
