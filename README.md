@@ -231,7 +231,7 @@ When nothing on the device overlaps:
 
 Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
 
-Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line. `longest_blocker.bytes` is the size of a copy or memset when that row has a `bytes` column. A kernel, synchronize, gap, or a copy whose export omitted the size is null. Do not invent one.
+Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line. `longest_blocker.bytes` is the size of a copy or memset when that row has a `bytes` column and the transfer lies entirely inside the step. A kernel, synchronize, gap, a missing size, or a transfer that crosses the NVTX boundary is null: the column counts the whole transfer, not the clipped piece. Do not invent one.
 
 ## Input
 

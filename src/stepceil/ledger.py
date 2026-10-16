@@ -110,7 +110,10 @@ def _clip_op(op, lo, hi):
     end = min(op.end_ns, hi)
     if end <= start:
         return None
-    return replace(op, start_ns=start, end_ns=end)
+    # The bytes column counts the whole transfer. A clipped interval is only
+    # the piece inside the step, so that size would not match the duration.
+    byte_count = op.byte_count if start == op.start_ns and end == op.end_ns else None
+    return replace(op, start_ns=start, end_ns=end, byte_count=byte_count)
 
 
 def _require_identity(ops, range_name):

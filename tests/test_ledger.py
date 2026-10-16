@@ -143,6 +143,23 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["longest_blocker"]["name"], "pressure")
         self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 50)
 
+    def test_clipped_transfer_drops_its_byte_count(self):
+        inside = DeviceOp(
+            "memcpy", "memcpy HtoD", 0, 40, 1, 0, 1, (), 4096
+        )
+        kept = account(window(0, 40, [inside]))
+        self.assertEqual(kept["longest_blocker"]["kind"], "memcpy")
+        self.assertEqual(kept["longest_blocker"]["blocking_ns"], 40)
+        self.assertEqual(kept["longest_blocker"]["bytes"], 4096)
+
+        crossing = DeviceOp(
+            "memcpy", "memcpy HtoD", 0, 80, 1, 0, 1, (), 4096
+        )
+        dropped = account(window(0, 40, [crossing]))
+        self.assertEqual(dropped["longest_blocker"]["kind"], "memcpy")
+        self.assertEqual(dropped["longest_blocker"]["blocking_ns"], 40)
+        self.assertIsNone(dropped["longest_blocker"]["bytes"])
+
     def test_empty_step_is_one_gap(self):
         ledger = account(window(0, 100))
         self.assertEqual(ledger["gpu_busy_ns"], 0)
