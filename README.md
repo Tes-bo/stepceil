@@ -96,6 +96,7 @@ allow_rewrite: false
 ceiling_refused: none
 rewrite_threshold_numerator: 1
 rewrite_threshold_denominator: 10
+decision: change context synchronize first
 ```
 
 ```json
@@ -125,7 +126,8 @@ rewrite_threshold_denominator: 10
   "allow_rewrite": false,
   "ceiling_refused": null,
   "rewrite_threshold_numerator": 1,
-  "rewrite_threshold_denominator": 10
+  "rewrite_threshold_denominator": 10,
+  "decision": "change context synchronize first"
 }
 ```
 
@@ -160,13 +162,14 @@ allow_rewrite: false
 ceiling_refused: overlapping device work on more than one stream
 rewrite_threshold_numerator: 1
 rewrite_threshold_denominator: 10
+decision: do not rewrite a kernel from this report
 ```
 
 ## Compare two captures
 
 After a change, export the same NVTX range again. `faster` is true only when the later step is strictly shorter. A withheld ceiling still has a step time, so the comparison stands.
 
-`examples/after.sqlite` is the same kernel with the synchronize cut from 1000 ns to 200 ns. The step is 800 ns shorter. `pressure` is still 80 ns, which is now at least 10% of the shorter step, so `allow_rewrite` becomes true. The synchronize still blocks the other 120 ns, so the kernel is still not the longest blocker.
+`examples/after.sqlite` is the same kernel with the synchronize cut from 1000 ns to 200 ns. The step is 800 ns shorter. `pressure` is still 80 ns, which is now at least 10% of the shorter step, so `allow_rewrite` becomes true. The synchronize still blocks the other 120 ns. Both ledgers say `change context synchronize first`. The flag flipping does not change the action.
 
 ![The step shrinks from 1000 ns to 200 ns. pressure stays 80 ns, and the synchronize is still the longest blocker.](docs/figures/diff.svg)
 
@@ -198,6 +201,8 @@ before_allow_rewrite: false
 after_allow_rewrite: true
 before_ceiling_refused: none
 after_ceiling_refused: none
+before_decision: change context synchronize first
+after_decision: change context synchronize first
 ```
 
 The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that same JSON.
@@ -213,7 +218,7 @@ When nothing on the device overlaps:
 - A synchronization call blocks the step only where it covers idle time. Time already covered by a kernel, copy, or memset stays on that operation.
 - Idle time with no synchronization call is a gap named `gpu idle`.
 
-`allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger.
+`allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
 
 Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
 
@@ -242,9 +247,8 @@ More than one GPU inside the step exits 2 and prints no ledger. A peer copy coun
 
 `skill/SKILL.md` is the rule sheet:
 
-- Change `longest_blocker` first.
-- Rewrite the hottest kernel only when `allow_rewrite` is true and that kernel is the longest blocker.
-- When `ceiling_refused` is not null, do not rewrite kernels from that report.
+- Obey `decision`. Rewrite a kernel only when it is `rewrite` followed by that kernel's name.
+- Any other `decision` means do not rewrite a kernel from this report.
 - After a change, run `stepceil diff` on the two exports. Do not claim the step got faster unless `faster` is true.
 
 ## MCP

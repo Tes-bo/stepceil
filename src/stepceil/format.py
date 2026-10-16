@@ -44,6 +44,8 @@ def render_diff_text(report):
     lines.append(
         f"after_ceiling_refused: {_cell(report['after_ceiling_refused'])}"
     )
+    lines.append(f"before_decision: {report['before_decision']}")
+    lines.append(f"after_decision: {report['after_decision']}")
     return "\n".join(lines) + "\n"
 
 
@@ -78,6 +80,7 @@ def render_text(ledger):
         "rewrite_threshold_denominator: "
         f"{ledger['rewrite_threshold_denominator']}"
     )
+    lines.append(f"decision: {ledger['decision']}")
     return "\n".join(lines) + "\n"
 
 

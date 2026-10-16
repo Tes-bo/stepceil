@@ -28,12 +28,11 @@ stepceil REPORT.sqlite --range STEP --json
 
 If the `step_ceiling` MCP tool is connected, call it with `path` and `range`. It returns this same JSON.
 
-Obey the JSON:
+Obey `decision`. Do not derive a different action from `allow_rewrite`.
 
-- Change `longest_blocker` first.
-- Rewrite the hottest kernel only when `allow_rewrite` is true and that kernel is the longest blocker.
-- When `allow_rewrite` is false, do not rewrite the hottest kernel. The program sets that flag when the ceiling is under 10% of the step (`ceiling_ns * 10 >= step_time_ns`).
-- When `ceiling_refused` is not null, do not rewrite any kernel from this report. Profile a step whose device work does not overlap, then run the program again.
+- Rewrite a kernel only when `decision` is `rewrite` followed by that kernel's name.
+- Any other `decision` means do not rewrite a kernel from this report. `change ... first` names the blocker to change, including when `allow_rewrite` is true.
+- When `decision` is `do not rewrite a kernel from this report`, profile a step whose device work does not overlap, then run the program again.
 - `source` is null in this version. Do not invent a file and line.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
 

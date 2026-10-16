@@ -28,4 +28,6 @@ def compare_ledgers(before, after):
         "after_allow_rewrite": after["allow_rewrite"],
         "before_ceiling_refused": before["ceiling_refused"],
         "after_ceiling_refused": after["ceiling_refused"],
+        "before_decision": before["decision"],
+        "after_decision": after["decision"],
     }

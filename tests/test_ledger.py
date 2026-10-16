@@ -197,6 +197,37 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["longest_blocker"]["kind"], "memcpy")
         self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 50)
 
+    def test_decision_is_not_the_allow_rewrite_flag(self):
+        summed = account(window(0, 100, [
+            kernel("pressure", 0, 6),
+            kernel("pressure", 10, 16),
+        ]))
+        self.assertTrue(summed["allow_rewrite"])
+        self.assertEqual(summed["longest_blocker"]["kind"], "gap")
+        self.assertEqual(summed["decision"], "change gpu idle first")
+
+        whole = account(window(0, 100, [kernel("pressure", 0, 100)]))
+        self.assertEqual(whole["decision"], "rewrite pressure")
+
+        pieces = [kernel("pressure", 0, 9)]
+        cursor = 9
+        for index, width in enumerate((8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 3)):
+            pieces.append(kernel(f"other{index}", cursor, cursor + width))
+            cursor += width
+        self.assertEqual(cursor, 100)
+        under = account(window(0, 100, pieces))
+        self.assertFalse(under["allow_rewrite"])
+        self.assertEqual(under["longest_blocker"]["name"], "pressure")
+        self.assertEqual(under["decision"], "change pressure first")
+
+        overlap = account(window(0, 100, [
+            kernel("alpha", 0, 60, stream_id=1),
+            kernel("beta", 40, 100, stream_id=2),
+        ]))
+        self.assertEqual(
+            overlap["decision"], "do not rewrite a kernel from this report"
+        )
+
     def test_overlap_class_matches_pairs(self):
         rng = random.Random(1)
         for _ in range(40):

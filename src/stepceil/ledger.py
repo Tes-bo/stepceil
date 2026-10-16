@@ -65,6 +65,7 @@ def account(window):
     )
     longest = _longest(candidates)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
+    allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
         window,
         busy,
@@ -73,8 +74,9 @@ def account(window):
         longest,
         hottest,
         ceiling,
-        _allows_rewrite(ceiling, step_time),
+        allow,
         None,
+        _decision(longest, hottest, allow, None),
     )
 
 
@@ -241,11 +243,36 @@ def _allows_rewrite(ceiling, step_time):
     return ceiling * REWRITE_DENOMINATOR >= step_time * REWRITE_NUMERATOR
 
 
+def _decision(longest, hottest, allow, refused):
+    """The action the agent must take. It is not allow_rewrite by another name.
+
+    allow_rewrite can be true while a synchronize or a gap is still the
+    longest blocker. Rewrite is only the case where that flag is true and
+    the hottest kernel is that blocker.
+    """
+    if refused is not None or longest is None:
+        return "do not rewrite a kernel from this report"
+    if (
+        allow
+        and hottest is not None
+        and longest["kind"] == "kernel"
+        and longest["name"] == hottest["name"]
+    ):
+        return f"rewrite {hottest['name']}"
+    return f"change {longest['name']} first"
+
+
 def _refused(window, busy, idle, reason):
-    return _ledger(window, busy, idle, reason, None, None, None, False, reason)
+    return _ledger(
+        window, busy, idle, reason, None, None, None, False, reason,
+        _decision(None, None, False, reason),
+    )
 
 
-def _ledger(window, busy, idle, assumption, longest, hottest, ceiling, allow, refused):
+def _ledger(
+    window, busy, idle, assumption, longest, hottest, ceiling, allow, refused,
+    decision,
+):
     return {
         "range": window.name,
         "step_start_ns": window.start_ns,
@@ -261,4 +288,5 @@ def _ledger(window, busy, idle, assumption, longest, hottest, ceiling, allow, re
         "ceiling_refused": refused,
         "rewrite_threshold_numerator": REWRITE_NUMERATOR,
         "rewrite_threshold_denominator": REWRITE_DENOMINATOR,
+        "decision": decision,
     }
