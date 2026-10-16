@@ -14,6 +14,7 @@ class DeviceOp:
     context_id: int | None = None
     peer_device_ids: tuple[int, ...] = ()
     byte_count: int | None = None
+    process_id: int | None = None
 
 
 @dataclass(frozen=True)

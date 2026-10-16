@@ -2,6 +2,7 @@ import _path  # noqa: F401
 import random
 import unittest
 
+from stepceil.errors import StepceilError
 from stepceil.format import render_json, render_text
 from stepceil.intervals import length, merge
 from stepceil.ledger import (
@@ -19,8 +20,13 @@ def window(start, end, ops=(), syncs=(), name="step"):
     return StepWindow(name, start, end, tuple(ops), tuple(syncs))
 
 
-def kernel(name, start, end, stream_id=1, device_id=0, context_id=1):
-    return DeviceOp("kernel", name, start, end, stream_id, device_id, context_id)
+def kernel(
+    name, start, end, stream_id=1, device_id=0, context_id=1, process_id=None,
+):
+    return DeviceOp(
+        "kernel", name, start, end, stream_id, device_id, context_id,
+        process_id=process_id,
+    )
 
 
 def copy(start, end, name="memcpy HtoD", stream_id=1):
@@ -134,6 +140,30 @@ class LedgerTest(unittest.TestCase):
             kernel("other", 200, 300, device_id=1),
         ]))
         self.assertEqual(ledger["ceiling_ns"], 40)
+
+    def test_two_processes_inside_the_step_refuse(self):
+        with self.assertRaises(StepceilError) as raised:
+            account(window(0, 40, [
+                kernel("pressure", 0, 10, process_id=10),
+                kernel("other", 10, 20, process_id=11),
+            ]))
+        self.assertIn("process ids 10, 11", str(raised.exception))
+
+        outside = account(window(0, 40, [
+            kernel("pressure", 0, 40, process_id=10),
+            kernel("other", 50, 90, process_id=11),
+        ]))
+        self.assertEqual(outside["hottest_kernel"]["name"], "pressure")
+        self.assertEqual(outside["ceiling_ns"], 40)
+
+        kept = account(window(0, 40, [
+            kernel("pressure", 0, 20, process_id=10),
+            kernel("tail", 20, 30, process_id=10),
+            kernel("anon", 30, 40, process_id=None),
+        ]))
+        self.assertEqual(kept["ceiling_ns"], 20)
+        self.assertEqual(kept["gpu_busy_ns"], 40)
+        self.assertIsNone(kept["ceiling_refused"])
 
     def test_two_gpus_inside_the_step_refuse(self):
         with self.assertRaisesRegex(Exception, "device ids 0, 1"):

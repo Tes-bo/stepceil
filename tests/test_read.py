@@ -255,6 +255,39 @@ class ReadTest(unittest.TestCase):
             ledger = account(load_path(same, "step"))
             self.assertEqual(ledger["longest_blocker"]["kind"], "memcpy")
 
+    def test_global_pid_is_the_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mixed = Path(tmp) / "mixed.sqlite"
+            write_export(
+                mixed,
+                [{"text": "step", "start": 0, "end": 40}],
+                kernels=[
+                    {"name": "pressure", "start": 0, "end": 10, "stream_id": 7},
+                    {"name": "other", "start": 0, "end": 10, "stream_id": 7},
+                ],
+            )
+            _assign_global_pids(
+                mixed, "CUPTI_ACTIVITY_KIND_KERNEL", (10, 11),
+            )
+            with self.assertRaisesRegex(StepceilError, "process ids 10, 11"):
+                account(load_path(mixed, "step"))
+
+            outside = Path(tmp) / "outside.sqlite"
+            write_export(
+                outside,
+                [{"text": "step", "start": 0, "end": 40}],
+                kernels=[
+                    {"name": "pressure", "start": 0, "end": 40},
+                    {"name": "other", "start": 100, "end": 140},
+                ],
+            )
+            _assign_global_pids(
+                outside, "CUPTI_ACTIVITY_KIND_KERNEL", (10, 11),
+            )
+            ledger = account(load_path(outside, "step"))
+            self.assertEqual(ledger["hottest_kernel"]["name"], "pressure")
+            self.assertEqual(ledger["ceiling_ns"], 40)
+
     def test_copy_and_memset_blockers_carry_their_byte_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             copied = Path(tmp) / "copy.sqlite"
@@ -419,6 +452,21 @@ def _export_sync_runtime(path, label, calls):
         connection.execute(
             "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (?, ?, 9, ?)",
             (start, end, index),
+        )
+    connection.commit()
+    connection.close()
+
+
+def _assign_global_pids(path, table, pids):
+    connection = sqlite3.connect(path)
+    connection.execute(f"ALTER TABLE {table} ADD COLUMN globalPid INTEGER")
+    rows = connection.execute(
+        f"SELECT rowid FROM {table} ORDER BY rowid"
+    ).fetchall()
+    for row, pid in zip(rows, pids):
+        connection.execute(
+            f"UPDATE {table} SET globalPid = ? WHERE rowid = ?",
+            (pid, row[0]),
         )
     connection.commit()
     connection.close()

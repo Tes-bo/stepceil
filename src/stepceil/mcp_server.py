@@ -29,7 +29,7 @@ TOOL = {
         "without this tool. Obey decision. Rewrite a kernel only when "
         "decision is rewrite followed by that kernel's name. When overlap "
         "is present, those two clipped operations collided. Do not add "
-        "their durations."
+        "their durations. More than one process in the step is an error."
     ),
     "inputSchema": {
         "type": "object",

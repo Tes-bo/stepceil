@@ -273,6 +273,8 @@ def _device_rows(connection, table, columns, start_ns, end_ns, extra):
     selected = ["start", "end", "deviceId", "streamId"]
     if "contextId" in columns:
         selected.append("contextId")
+    if "globalPid" in columns:
+        selected.append("globalPid")
     selected.extend(extra)
     query = (
         f"SELECT {', '.join(selected)} FROM {table} "
@@ -293,6 +295,9 @@ def _device_op(kind, name, row, table, byte_count=None):
     if "contextId" in keys and row["contextId"] is not None:
         context_id = int(row["contextId"])
     device_id = _required_int(row, "deviceId", table)
+    process_id = None
+    if "globalPid" in keys and row["globalPid"] is not None:
+        process_id = int(row["globalPid"])
     return DeviceOp(
         kind=kind,
         name=name,
@@ -303,6 +308,7 @@ def _device_op(kind, name, row, table, byte_count=None):
         context_id=context_id,
         peer_device_ids=_peer_device_ids(row, device_id),
         byte_count=byte_count,
+        process_id=process_id,
     )
 
 

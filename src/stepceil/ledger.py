@@ -152,6 +152,15 @@ def _require_identity(ops, range_name):
             f"more than one GPU in NVTX range {range_name!r} "
             f"(device ids {ids}); this version does not account that"
         )
+    # Stream ids are per process. Two processes in one export reuse them,
+    # so the other process is not this step's stream and not its ceiling.
+    processes = sorted({op.process_id for op in ops if op.process_id is not None})
+    if len(processes) > 1:
+        ids = ", ".join(str(process) for process in processes)
+        raise StepceilError(
+            f"more than one process in NVTX range {range_name!r} "
+            f"(process ids {ids}); this version does not account that"
+        )
 
 
 def _stream_key(op):
