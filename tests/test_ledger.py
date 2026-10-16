@@ -101,6 +101,12 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_SAME)
         self.assertEqual(ledger["gpu_busy_ns"], 15)
         self.assertIsNone(ledger["longest_blocker"])
+        self.assertEqual(ledger["overlap"]["first"]["start_ns"], 0)
+        self.assertEqual(ledger["overlap"]["first"]["end_ns"], 10)
+        self.assertEqual(ledger["overlap"]["second"]["start_ns"], 5)
+        self.assertEqual(ledger["overlap"]["second"]["end_ns"], 15)
+        self.assertEqual(ledger["overlap"]["first"]["stream_id"], 1)
+        self.assertEqual(ledger["overlap"]["second"]["stream_id"], 1)
 
     def test_different_contexts_count_as_overlap(self):
         ledger = account(window(0, 20, [
@@ -108,6 +114,10 @@ class LedgerTest(unittest.TestCase):
             kernel("other", 5, 15, context_id=2),
         ]))
         self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
+        self.assertEqual(ledger["overlap"]["first"]["context_id"], 1)
+        self.assertEqual(ledger["overlap"]["second"]["context_id"], 2)
+        self.assertEqual(ledger["overlap"]["first"]["stream_id"], 1)
+        self.assertEqual(ledger["overlap"]["second"]["stream_id"], 1)
 
     def test_overlap_outside_the_step_does_not_count(self):
         ledger = account(window(0, 40, [
@@ -244,6 +254,33 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(
             overlap["decision"], "do not rewrite a kernel from this report"
         )
+        self.assertEqual(overlap["overlap"]["first"]["name"], "alpha")
+        self.assertEqual(overlap["overlap"]["second"]["name"], "beta")
+        self.assertIsNone(account(window(0, 30, [
+            kernel("pressure", 0, 10),
+            kernel("pressure", 10, 20),
+        ]))["overlap"])
+
+        crossed = account(window(0, 100, [
+            kernel("wide", 0, 100, stream_id=1),
+            kernel("nested", 10, 20, stream_id=1),
+            kernel("other", 15, 25, stream_id=2),
+        ]))
+        self.assertEqual(crossed["overlap"]["first"]["name"], "wide")
+        self.assertEqual(crossed["overlap"]["second"]["name"], "other")
+        self.assertNotEqual(
+            crossed["overlap"]["first"]["stream_id"],
+            crossed["overlap"]["second"]["stream_id"],
+        )
+
+        clipped = account(window(0, 50, [
+            kernel("alpha", -10, 40, stream_id=1),
+            kernel("beta", 30, 80, stream_id=2),
+        ]))
+        self.assertEqual(clipped["overlap"]["first"]["start_ns"], 0)
+        self.assertEqual(clipped["overlap"]["first"]["end_ns"], 40)
+        self.assertEqual(clipped["overlap"]["second"]["start_ns"], 30)
+        self.assertEqual(clipped["overlap"]["second"]["end_ns"], 50)
 
     def test_overlap_class_matches_pairs(self):
         rng = random.Random(1)
@@ -268,10 +305,21 @@ class LedgerTest(unittest.TestCase):
                 ledger["gpu_busy_ns"],
                 length(merge((op.start_ns, op.end_ns) for op in ops)),
             )
-            if _reference_overlap(ops) is None:
+            kind = _reference_overlap(ops)
+            if kind is None:
                 self.assertIsNone(ledger["ceiling_refused"])
+                self.assertIsNone(ledger["overlap"])
             else:
                 self.assertIsNone(ledger["ceiling_ns"])
+                pair = ledger["overlap"]
+                self.assertLess(pair["first"]["start_ns"], pair["second"]["end_ns"])
+                self.assertLess(pair["second"]["start_ns"], pair["first"]["end_ns"])
+                left = (pair["first"]["context_id"], pair["first"]["stream_id"])
+                right = (pair["second"]["context_id"], pair["second"]["stream_id"])
+                if kind == "multi":
+                    self.assertNotEqual(left, right)
+                else:
+                    self.assertEqual(left, right)
 
 
 def _reference_overlap(ops):

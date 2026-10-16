@@ -74,6 +74,7 @@ def render_text(ledger):
     lines.append(f"ceiling_ns: {_cell(ledger['ceiling_ns'])}")
     lines.append(f"allow_rewrite: {_cell(ledger['allow_rewrite'])}")
     lines.append(f"ceiling_refused: {_cell(ledger['ceiling_refused'])}")
+    lines.extend(_overlap_lines(ledger["overlap"]))
     lines.append(
         "rewrite_threshold_numerator: "
         f"{ledger['rewrite_threshold_numerator']}"
@@ -84,6 +85,18 @@ def render_text(ledger):
     )
     lines.append(f"decision: {ledger['decision']}")
     return "\n".join(lines) + "\n"
+
+
+def _overlap_lines(overlap):
+    lines = []
+    for side in ("first", "second"):
+        obj = None if overlap is None else overlap[side]
+        lines.extend(_object_lines(
+            f"overlap.{side}",
+            obj,
+            ("kind", "name", "start_ns", "end_ns", "stream_id", "context_id"),
+        ))
+    return lines
 
 
 def _object_lines(prefix, obj, fields):

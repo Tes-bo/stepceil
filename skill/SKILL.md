@@ -32,7 +32,7 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 
 - Rewrite a kernel only when `decision` is `rewrite` followed by that kernel's name.
 - Any other `decision` means do not rewrite a kernel from this report. `change ... first` names the blocker to change, including when `allow_rewrite` is true.
-- When `decision` is `do not rewrite a kernel from this report`, profile a step whose device work does not overlap, then run the program again.
+- When `decision` is `do not rewrite a kernel from this report`, profile a step whose device work does not overlap, then run the program again. `overlap` names the two clipped operations that collided. Do not add their durations.
 - `source` is null in this version. Do not invent a file and line.
 - When the blocker is a copy or memset, `longest_blocker.bytes` is its size from the export only if that transfer lies entirely inside the step. Null means the export did not say, or the transfer crosses the boundary. Do not invent a size.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.

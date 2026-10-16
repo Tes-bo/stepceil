@@ -46,11 +46,11 @@ def account(window):
     if busy + idle != step_time or busy < 0 or idle < 0:
         raise RuntimeError("busy and idle do not add up to the step")
 
-    overlap = overlap_class(clipped)
-    if overlap == "multi":
-        return _refused(window, busy, idle, ASSUMPTION_MULTI)
-    if overlap == "same":
-        return _refused(window, busy, idle, ASSUMPTION_SAME)
+    overlap_kind, overlap_pair = _scan_overlap(clipped)
+    if overlap_kind == "multi":
+        return _refused(window, busy, idle, ASSUMPTION_MULTI, overlap_pair)
+    if overlap_kind == "same":
+        return _refused(window, busy, idle, ASSUMPTION_SAME, overlap_pair)
 
     holes = complement(busy_spans, window.start_ns, window.end_ns)
     sync_pieces, gap_pieces = _idle_pieces(holes, window.syncs)
@@ -77,32 +77,50 @@ def account(window):
         allow,
         None,
         _decision(longest, hottest, allow, None),
+        None,
     )
 
 
 def overlap_class(ops):
     """Return None, 'multi', or 'same' for clipped device operations."""
+    kind, _pair = _scan_overlap(ops)
+    return kind
+
+
+def _scan_overlap(ops):
+    """Classify overlap, and keep the pair that first establishes that class.
+
+    Operations are ordered by start. The first one that intersects an
+    operation already open is the witness. A cross-stream pair wins over
+    a same-stream pair, because that is the class the ledger reports.
+    """
     ordered = sorted(ops, key=lambda op: (op.start_ns, op.end_ns, op.stream_id))
     if not ordered:
-        return None
+        return None, None
     current = ordered[0]
     multi = False
     same = False
+    witness_multi = None
+    witness_same = None
     for nxt in ordered[1:]:
         if nxt.start_ns < current.end_ns:
             if _stream_key(nxt) != _stream_key(current):
                 multi = True
+                if witness_multi is None:
+                    witness_multi = (current, nxt)
             else:
                 same = True
+                if witness_same is None:
+                    witness_same = (current, nxt)
             if nxt.end_ns > current.end_ns:
                 current = nxt
         else:
             current = nxt
     if multi:
-        return "multi"
+        return "multi", witness_multi
     if same:
-        return "same"
-    return None
+        return "same", witness_same
+    return None, None
 
 
 def _clip_op(op, lo, hi):
@@ -268,16 +286,35 @@ def _decision(longest, hottest, allow, refused):
     return f"change {longest['name']} first"
 
 
-def _refused(window, busy, idle, reason):
+def _refused(window, busy, idle, reason, pair):
     return _ledger(
         window, busy, idle, reason, None, None, None, False, reason,
         _decision(None, None, False, reason),
+        _overlap_payload(pair),
     )
+
+
+def _overlap_payload(pair):
+    if pair is None:
+        return None
+    first, second = pair
+    return {"first": _overlap_op(first), "second": _overlap_op(second)}
+
+
+def _overlap_op(op):
+    return {
+        "kind": op.kind,
+        "name": op.name,
+        "start_ns": op.start_ns,
+        "end_ns": op.end_ns,
+        "stream_id": op.stream_id,
+        "context_id": op.context_id,
+    }
 
 
 def _ledger(
     window, busy, idle, assumption, longest, hottest, ceiling, allow, refused,
-    decision,
+    decision, overlap,
 ):
     return {
         "range": window.name,
@@ -292,6 +329,7 @@ def _ledger(
         "ceiling_ns": ceiling,
         "allow_rewrite": allow,
         "ceiling_refused": refused,
+        "overlap": overlap,
         "rewrite_threshold_numerator": REWRITE_NUMERATOR,
         "rewrite_threshold_denominator": REWRITE_DENOMINATOR,
         "decision": decision,

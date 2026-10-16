@@ -99,6 +99,18 @@ hottest_kernel.source: none
 ceiling_ns: 80
 allow_rewrite: false
 ceiling_refused: none
+overlap.first.kind: none
+overlap.first.name: none
+overlap.first.start_ns: none
+overlap.first.end_ns: none
+overlap.first.stream_id: none
+overlap.first.context_id: none
+overlap.second.kind: none
+overlap.second.name: none
+overlap.second.start_ns: none
+overlap.second.end_ns: none
+overlap.second.stream_id: none
+overlap.second.context_id: none
 rewrite_threshold_numerator: 1
 rewrite_threshold_denominator: 10
 decision: change context synchronize first
@@ -131,6 +143,7 @@ decision: change context synchronize first
   "ceiling_ns": 80,
   "allow_rewrite": false,
   "ceiling_refused": null,
+  "overlap": null,
   "rewrite_threshold_numerator": 1,
   "rewrite_threshold_denominator": 10,
   "decision": "change context synchronize first"
@@ -139,7 +152,7 @@ decision: change context synchronize first
 
 ## Overlap is not a bigger ceiling
 
-`alpha` and `beta` each run 60 ns, on two streams, and overlap. Adding them produces 120 ns, which is longer than the 100 ns step. The GPU was busy for the union, 100 ns. This version withholds the ceiling instead of publishing the inflated sum. `ceiling_ns` is null and `allow_rewrite` is false. Busy and idle are still reported.
+`alpha` and `beta` each run 60 ns, on two streams, and overlap. Adding them produces 120 ns, which is longer than the 100 ns step. The GPU was busy for the union, 100 ns. This version withholds the ceiling instead of publishing the inflated sum. `ceiling_ns` is null and `allow_rewrite` is false. Busy and idle are still reported. `overlap` names the two clipped launches: `alpha` on stream 1 and `beta` on stream 2. Do not add those durations.
 
 ![Two 60 ns kernels overlap, so their sum is 120 ns and the union is 100 ns. The ceiling is withheld.](docs/figures/overlap-withheld.svg)
 
@@ -167,6 +180,18 @@ hottest_kernel.source: none
 ceiling_ns: none
 allow_rewrite: false
 ceiling_refused: overlapping device work on more than one stream
+overlap.first.kind: kernel
+overlap.first.name: alpha
+overlap.first.start_ns: 0
+overlap.first.end_ns: 60
+overlap.first.stream_id: 1
+overlap.first.context_id: 1
+overlap.second.kind: kernel
+overlap.second.name: beta
+overlap.second.start_ns: 40
+overlap.second.end_ns: 100
+overlap.second.stream_id: 2
+overlap.second.context_id: 1
 rewrite_threshold_numerator: 1
 rewrite_threshold_denominator: 10
 decision: do not rewrite a kernel from this report
@@ -229,7 +254,7 @@ When nothing on the device overlaps:
 
 `allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
 
-Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
+Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. `overlap` names the clipped pair that first establishes that class. A cross-stream pair is kept when both kinds of overlap are present. Adding the two durations is not a ceiling. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
 
 Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line. `longest_blocker.bytes` is the size of a copy or memset when that row has a `bytes` column and the transfer lies entirely inside the step. A kernel, synchronize, gap, a missing size, or a transfer that crosses the NVTX boundary is null: the column counts the whole transfer, not the clipped piece. Do not invent one.
 
@@ -257,7 +282,7 @@ More than one GPU inside the step exits 2 and prints no ledger. A peer copy coun
 `skill/SKILL.md` is the rule sheet:
 
 - Obey `decision`. Rewrite a kernel only when it is `rewrite` followed by that kernel's name.
-- Any other `decision` means do not rewrite a kernel from this report.
+- Any other `decision` means do not rewrite a kernel from this report. When `overlap` is set, those two operations collided. Do not add their durations.
 - After a change, run `stepceil diff` on the two exports. Do not claim the step got faster unless `faster` is true.
 
 ## MCP

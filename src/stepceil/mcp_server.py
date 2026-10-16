@@ -27,7 +27,9 @@ TOOL = {
         "Read one NVTX range from an nsys sqlite export and return the "
         "speedup ceiling of that GPU step. Do not estimate the ceiling "
         "without this tool. Obey decision. Rewrite a kernel only when "
-        "decision is rewrite followed by that kernel's name."
+        "decision is rewrite followed by that kernel's name. When overlap "
+        "is present, those two clipped operations collided. Do not add "
+        "their durations."
     ),
     "inputSchema": {
         "type": "object",
