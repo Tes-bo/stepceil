@@ -256,7 +256,7 @@ def _syncs(connection, strings, start_ns, end_ns, sync_labels):
         name = _sync_name(sync_type, sync_labels)
         correlation = row["correlationId"] if "correlationId" in row.keys() else None
         if correlation is not None:
-            runtime_name = _overlapping_runtime_name(
+            runtime_name = _covering_sync_name(
                 runtime, int(correlation), start, end
             )
             if runtime_name:
@@ -316,9 +316,9 @@ def _peer_device_ids(row, device_id):
 def _runtime_index(connection, strings):
     """Runtime API calls keyed by correlation id.
 
-    CUPTI_ACTIVITY_KIND_SYNCHRONIZATION labels cudaDeviceSynchronize as
-    Unknown in Nsight Systems 2022.4. The runtime row with the same
-    correlation id carries the API name.
+    CUPTI_ACTIVITY_KIND_SYNCHRONIZATION can label cudaDeviceSynchronize
+    as Unknown. The runtime call that covers that record carries the
+    API name. A launch that only overlaps it does not.
     """
     table = "CUPTI_ACTIVITY_KIND_RUNTIME"
     if not _has_table(connection, table):
@@ -341,14 +341,19 @@ def _runtime_index(connection, strings):
     return grouped
 
 
-def _overlapping_runtime_name(runtime, correlation_id, start, end):
+def _covering_sync_name(runtime, correlation_id, start, end):
     names = []
     for call_start, call_end, name in runtime.get(correlation_id, ()):
-        if call_end > start and call_start < end and name not in names:
+        covers = call_start <= start and call_end >= end
+        if covers and _is_sync_api(name) and name not in names:
             names.append(name)
     if len(names) == 1:
         return names[0]
     return None
+
+
+def _is_sync_api(name):
+    return "Sync" in name or "Wait" in name
 
 
 def _enum_labels(connection, table):

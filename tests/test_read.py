@@ -258,57 +258,50 @@ class ReadTest(unittest.TestCase):
     def test_runtime_call_names_an_unknown_synchronize(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.sqlite"
-            write_export(
-                path,
-                [{"text": "step", "start": 0, "end": 100}],
-                syncs=[{"sync_type": 0, "start": 0, "end": 100}],
-            )
-            connection = sqlite3.connect(path)
-            connection.execute(
-                "ALTER TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION "
-                "ADD COLUMN correlationId INTEGER"
-            )
-            connection.execute(
-                "UPDATE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION SET correlationId = 9"
-            )
-            connection.execute(
-                """
-                CREATE TABLE ENUM_CUPTI_SYNC_TYPE (
-                    id INTEGER, name TEXT, label TEXT
-                )
-                """
-            )
-            connection.execute(
-                "INSERT INTO ENUM_CUPTI_SYNC_TYPE VALUES (0, 'UNK', 'Unknown')"
-            )
-            connection.execute(
-                """
-                CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (
-                    start INTEGER,
-                    end INTEGER,
-                    correlationId INTEGER,
-                    nameId INTEGER
-                )
-                """
-            )
-            connection.execute(
-                "INSERT INTO StringIds (id, value) VALUES (3, 'cudaLaunchKernel')"
-            )
-            connection.execute(
-                "INSERT INTO StringIds (id, value) VALUES (4, 'cudaDeviceSynchronize')"
-            )
-            # Same correlation id, but the launch does not meet the sync.
-            connection.execute(
-                "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (200, 210, 9, 3)"
-            )
-            connection.execute(
-                "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (0, 100, 9, 4)"
-            )
-            connection.commit()
-            connection.close()
+            _export_sync_runtime(path, "Unknown", [
+                (200, 210, "cudaLaunchKernel"),
+                (0, 100, "cudaDeviceSynchronize"),
+            ])
             ledger = account(load_path(path, "step"))
             self.assertEqual(
                 ledger["longest_blocker"]["name"], "cudaDeviceSynchronize"
+            )
+
+    def test_a_launch_does_not_rename_the_synchronize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            overlap = Path(tmp) / "overlap.sqlite"
+            _export_sync_runtime(overlap, "Unknown", [
+                (0, 50, "cudaLaunchKernel"),
+            ])
+            self.assertEqual(
+                account(load_path(overlap, "step"))["longest_blocker"]["name"],
+                "Unknown",
+            )
+            covering = Path(tmp) / "covering.sqlite"
+            _export_sync_runtime(covering, "Unknown", [
+                (0, 100, "cudaLaunchKernel"),
+            ])
+            self.assertEqual(
+                account(load_path(covering, "step"))["longest_blocker"]["name"],
+                "Unknown",
+            )
+            named = Path(tmp) / "named.sqlite"
+            _export_sync_runtime(named, "Stream wait sync", [
+                (0, 40, "cudaLaunchKernel"),
+                (0, 100, "cudaStreamSynchronize"),
+            ])
+            self.assertEqual(
+                account(load_path(named, "step"))["longest_blocker"]["name"],
+                "cudaStreamSynchronize",
+            )
+            both = Path(tmp) / "both.sqlite"
+            _export_sync_runtime(both, "Stream wait sync", [
+                (0, 100, "cudaDeviceSynchronize"),
+                (0, 100, "cudaStreamSynchronize"),
+            ])
+            self.assertEqual(
+                account(load_path(both, "step"))["longest_blocker"]["name"],
+                "Stream wait sync",
             )
 
     def test_readme_examples_are_the_exports_in_the_repository(self):
@@ -325,6 +318,50 @@ class ReadTest(unittest.TestCase):
         self.assertTrue(diff["faster"])
         self.assertEqual(diff["step_time_ns_delta"], -800)
         self.assertEqual(diff["after_longest_blocker"]["kind"], "sync")
+
+
+def _export_sync_runtime(path, label, calls):
+    write_export(
+        path,
+        [{"text": "step", "start": 0, "end": 100}],
+        syncs=[{"sync_type": 0, "start": 0, "end": 100}],
+    )
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "ALTER TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION "
+        "ADD COLUMN correlationId INTEGER"
+    )
+    connection.execute(
+        "UPDATE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION SET correlationId = 9"
+    )
+    connection.execute(
+        "CREATE TABLE ENUM_CUPTI_SYNC_TYPE (id INTEGER, name TEXT, label TEXT)"
+    )
+    connection.execute(
+        "INSERT INTO ENUM_CUPTI_SYNC_TYPE VALUES (0, 'ENUM', ?)",
+        (label,),
+    )
+    connection.execute(
+        """
+        CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (
+            start INTEGER,
+            end INTEGER,
+            correlationId INTEGER,
+            nameId INTEGER
+        )
+        """
+    )
+    for index, (start, end, name) in enumerate(calls, start=3):
+        connection.execute(
+            "INSERT INTO StringIds (id, value) VALUES (?, ?)",
+            (index, name),
+        )
+        connection.execute(
+            "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (?, ?, 9, ?)",
+            (start, end, index),
+        )
+    connection.commit()
+    connection.close()
 
 
 def _add_peer_columns(path, src, dst):
