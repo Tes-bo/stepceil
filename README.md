@@ -91,6 +91,7 @@ longest_blocker.start_ns: 80
 longest_blocker.end_ns: 1000
 longest_blocker.blocking_ns: 920
 longest_blocker.source: none
+longest_blocker.bytes: none
 hottest_kernel.name: pressure
 hottest_kernel.ceiling_ns: 80
 hottest_kernel.instances: 1
@@ -118,7 +119,8 @@ decision: change context synchronize first
     "start_ns": 80,
     "end_ns": 1000,
     "blocking_ns": 920,
-    "source": null
+    "source": null,
+    "bytes": null
   },
   "hottest_kernel": {
     "name": "pressure",
@@ -157,6 +159,7 @@ longest_blocker.start_ns: none
 longest_blocker.end_ns: none
 longest_blocker.blocking_ns: none
 longest_blocker.source: none
+longest_blocker.bytes: none
 hottest_kernel.name: none
 hottest_kernel.ceiling_ns: none
 hottest_kernel.instances: none
@@ -193,12 +196,14 @@ before_longest_blocker.start_ns: 80
 before_longest_blocker.end_ns: 1000
 before_longest_blocker.blocking_ns: 920
 before_longest_blocker.source: none
+before_longest_blocker.bytes: none
 after_longest_blocker.kind: sync
 after_longest_blocker.name: context synchronize
 after_longest_blocker.start_ns: 80
 after_longest_blocker.end_ns: 200
 after_longest_blocker.blocking_ns: 120
 after_longest_blocker.source: none
+after_longest_blocker.bytes: none
 before_ceiling_ns: 80
 after_ceiling_ns: 80
 before_allow_rewrite: false
@@ -226,7 +231,7 @@ When nothing on the device overlaps:
 
 Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
 
-Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line.
+Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line. `longest_blocker.bytes` is the size of a copy or memset when that row has a `bytes` column. A kernel, synchronize, gap, or a copy whose export omitted the size is null. Do not invent one.
 
 ## Input
 

@@ -193,10 +193,12 @@ def _merge_sync(parts):
 
 
 def _op_candidate(op):
-    return _candidate(op.kind, op.name, op.start_ns, op.end_ns)
+    return _candidate(
+        op.kind, op.name, op.start_ns, op.end_ns, op.byte_count
+    )
 
 
-def _candidate(kind, name, start, end):
+def _candidate(kind, name, start, end, byte_count=None):
     return {
         "kind": kind,
         "name": name,
@@ -204,6 +206,7 @@ def _candidate(kind, name, start, end):
         "end_ns": end,
         "blocking_ns": end - start,
         "source": None,
+        "bytes": byte_count,
     }
 
 

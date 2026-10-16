@@ -29,12 +29,12 @@ def render_diff_text(report):
     lines.extend(_object_lines(
         "before_longest_blocker",
         report["before_longest_blocker"],
-        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source"),
+        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
     lines.extend(_object_lines(
         "after_longest_blocker",
         report["after_longest_blocker"],
-        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source"),
+        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
     lines.append(f"before_ceiling_ns: {_cell(report['before_ceiling_ns'])}")
     lines.append(f"after_ceiling_ns: {_cell(report['after_ceiling_ns'])}")
@@ -64,7 +64,7 @@ def render_text(ledger):
     lines.extend(_object_lines(
         "longest_blocker",
         ledger["longest_blocker"],
-        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source"),
+        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
     lines.extend(_object_lines(
         "hottest_kernel",

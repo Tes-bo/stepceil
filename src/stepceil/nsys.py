@@ -208,7 +208,7 @@ def _memcpys(connection, start_ns, end_ns, copy_labels):
     columns = _columns(connection, table)
     _require_columns(connection, table, ("start", "end", "deviceId", "streamId"))
     extra = tuple(
-        name for name in ("copyKind", "srcDeviceId", "dstDeviceId")
+        name for name in ("copyKind", "srcDeviceId", "dstDeviceId", "bytes")
         if name in columns
     )
     rows = _device_rows(connection, table, columns, start_ns, end_ns, extra)
@@ -218,7 +218,7 @@ def _memcpys(connection, start_ns, end_ns, copy_labels):
             name = _memcpy_name(row["copyKind"], copy_labels)
         else:
             name = "memcpy"
-        ops.append(_device_op("memcpy", name, row, table))
+        ops.append(_device_op("memcpy", name, row, table, _byte_count(row)))
     return ops
 
 
@@ -228,8 +228,12 @@ def _memsets(connection, start_ns, end_ns):
         return []
     columns = _columns(connection, table)
     _require_columns(connection, table, ("start", "end", "deviceId", "streamId"))
-    rows = _device_rows(connection, table, columns, start_ns, end_ns, ())
-    return [_device_op("memset", "memset", row, table) for row in rows]
+    extra = ("bytes",) if "bytes" in columns else ()
+    rows = _device_rows(connection, table, columns, start_ns, end_ns, extra)
+    return [
+        _device_op("memset", "memset", row, table, _byte_count(row))
+        for row in rows
+    ]
 
 
 def _syncs(connection, strings, start_ns, end_ns, sync_labels):
@@ -277,7 +281,13 @@ def _device_rows(connection, table, columns, start_ns, end_ns, extra):
     return list(connection.execute(query, (start_ns, end_ns)))
 
 
-def _device_op(kind, name, row, table):
+def _byte_count(row):
+    if "bytes" not in row.keys() or row["bytes"] is None:
+        return None
+    return int(row["bytes"])
+
+
+def _device_op(kind, name, row, table, byte_count=None):
     keys = row.keys()
     context_id = None
     if "contextId" in keys and row["contextId"] is not None:
@@ -292,6 +302,7 @@ def _device_op(kind, name, row, table):
         device_id=device_id,
         context_id=context_id,
         peer_device_ids=_peer_device_ids(row, device_id),
+        byte_count=byte_count,
     )
 
 

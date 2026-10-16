@@ -255,6 +255,49 @@ class ReadTest(unittest.TestCase):
             ledger = account(load_path(same, "step"))
             self.assertEqual(ledger["longest_blocker"]["kind"], "memcpy")
 
+    def test_copy_and_memset_blockers_carry_their_byte_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "copy.sqlite"
+            write_export(
+                copied,
+                [{"text": "step", "start": 0, "end": 80}],
+                kernels=[{"name": "pressure", "start": 0, "end": 10}],
+                copies=[{"start": 10, "end": 80, "copy_kind": 1}],
+            )
+            _set_bytes(copied, "CUPTI_ACTIVITY_KIND_MEMCPY", 4096)
+            ledger = account(load_path(copied, "step"))
+            self.assertEqual(ledger["longest_blocker"]["kind"], "memcpy")
+            self.assertEqual(ledger["longest_blocker"]["bytes"], 4096)
+            self.assertEqual(ledger["decision"], "change memcpy HtoD first")
+
+            kernel_led = account(load_path(
+                _kernel_only(Path(tmp) / "kernel.sqlite"), "step"
+            ))
+            self.assertEqual(kernel_led["longest_blocker"]["kind"], "kernel")
+            self.assertIsNone(kernel_led["longest_blocker"]["bytes"])
+
+            cleared = Path(tmp) / "memset.sqlite"
+            write_export(
+                cleared,
+                [{"text": "step", "start": 0, "end": 20}],
+                memsets=[{"start": 0, "end": 20}],
+            )
+            _set_bytes(cleared, "CUPTI_ACTIVITY_KIND_MEMSET", 16)
+            self.assertEqual(
+                account(load_path(cleared, "step"))["longest_blocker"]["bytes"],
+                16,
+            )
+
+            omitted = Path(tmp) / "omitted.sqlite"
+            write_export(
+                omitted,
+                [{"text": "step", "start": 0, "end": 20}],
+                copies=[{"start": 0, "end": 20, "copy_kind": 1}],
+            )
+            self.assertIsNone(
+                account(load_path(omitted, "step"))["longest_blocker"]["bytes"]
+            )
+
     def test_runtime_call_names_an_unknown_synchronize(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.sqlite"
@@ -318,6 +361,23 @@ class ReadTest(unittest.TestCase):
         self.assertTrue(diff["faster"])
         self.assertEqual(diff["step_time_ns_delta"], -800)
         self.assertEqual(diff["after_longest_blocker"]["kind"], "sync")
+
+
+def _kernel_only(path):
+    write_export(
+        path,
+        [{"text": "step", "start": 0, "end": 40}],
+        kernels=[{"name": "pressure", "start": 0, "end": 40}],
+    )
+    return path
+
+
+def _set_bytes(path, table, size):
+    connection = sqlite3.connect(path)
+    connection.execute(f"ALTER TABLE {table} ADD COLUMN bytes INTEGER")
+    connection.execute(f"UPDATE {table} SET bytes = ?", (size,))
+    connection.commit()
+    connection.close()
 
 
 def _export_sync_runtime(path, label, calls):
