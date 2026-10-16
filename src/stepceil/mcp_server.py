@@ -50,8 +50,10 @@ RANGES_TOOL = {
     "name": "step_ranges",
     "description": (
         "List NVTX range names in an nsys sqlite export. Account a name "
-        "only when count is 1 and closed is 1. Do not guess a range name "
-        "or replace a missing range with a start and end time."
+        "only when count is 1 and closed is 1. shortest_ns and longest_ns "
+        "are the closed occurrences. They do not choose a window. Do not "
+        "guess a range name or replace a missing range with a start and "
+        "end time."
     ),
     "inputSchema": {
         "type": "object",

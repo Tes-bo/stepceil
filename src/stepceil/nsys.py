@@ -54,25 +54,29 @@ def list_ranges(path):
     """NVTX range names in this export.
 
     The accountant accepts a name only when it occurs once and is closed.
-    This list uses those same events. It does not choose a window.
+    shortest_ns and longest_ns are the closed occurrences. They do not
+    choose a window.
     """
     connection = _open(path)
     try:
         counts = {}
-        closed = {}
+        durations = {}
         for name, start, end in _nvtx_events(connection):
             counts[name] = counts.get(name, 0) + 1
-            closed[name] = closed.get(name, 0) + (1 if _closed(start, end) else 0)
-        return {
-            "ranges": [
-                {
-                    "name": name,
-                    "count": counts[name],
-                    "closed": closed[name],
-                }
-                for name in sorted(counts)
-            ]
-        }
+            durations.setdefault(name, [])
+            if _closed(start, end):
+                durations[name].append(int(end) - int(start))
+        ranges = []
+        for name in sorted(counts):
+            closed = durations[name]
+            ranges.append({
+                "name": name,
+                "count": counts[name],
+                "closed": len(closed),
+                "shortest_ns": min(closed) if closed else None,
+                "longest_ns": max(closed) if closed else None,
+            })
+        return {"ranges": ranges}
     finally:
         connection.close()
 

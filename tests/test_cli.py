@@ -217,13 +217,35 @@ class CliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             report = json.loads(result.stdout)
             self.assertEqual(report["ranges"], [
-                {"name": "flat", "count": 1, "closed": 0},
-                {"name": "inner", "count": 3, "closed": 2},
-                {"name": "step", "count": 1, "closed": 1},
+                {
+                    "name": "flat",
+                    "count": 1,
+                    "closed": 0,
+                    "shortest_ns": None,
+                    "longest_ns": None,
+                },
+                {
+                    "name": "inner",
+                    "count": 3,
+                    "closed": 2,
+                    "shortest_ns": 4,
+                    "longest_ns": 4,
+                },
+                {
+                    "name": "step",
+                    "count": 1,
+                    "closed": 1,
+                    "shortest_ns": 10,
+                    "longest_ns": 10,
+                },
             ])
             text = run_cli("ranges", str(path))
             self.assertIn("ranges: 3", text.stdout)
-            self.assertIn("name: step\ncount: 1\nclosed: 1", text.stdout)
+            self.assertIn(
+                "name: step\ncount: 1\nclosed: 1\nshortest_ns: 10\nlongest_ns: 10",
+                text.stdout,
+            )
+            self.assertIn("shortest_ns: none", text.stdout)
             missing = run_cli("ranges", str(Path(tmp) / "missing.sqlite"))
             self.assertEqual(missing.returncode, 2)
             self.assertTrue(missing.stderr.startswith("stepceil:"))

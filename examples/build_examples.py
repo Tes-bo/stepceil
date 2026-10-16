@@ -42,8 +42,8 @@ def main():
         [
             {"text": "inner", "start": 0, "end": 4},
             {"text": "inner", "start": 4, "end": 8},
-            {"text": "inner", "start": 8, "end": 12},
-            {"text": "inner", "start": 12, "end": 16},
+            {"text": "inner", "start": 8, "end": 14},
+            {"text": "inner", "start": 14, "end": 30},
             {"text": "step", "start": 0, "end": 16},
         ],
     )

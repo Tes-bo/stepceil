@@ -9,6 +9,8 @@ def render_ranges_text(report):
         lines.append(f"name: {item['name']}")
         lines.append(f"count: {item['count']}")
         lines.append(f"closed: {item['closed']}")
+        lines.append(f"shortest_ns: {_cell(item['shortest_ns'])}")
+        lines.append(f"longest_ns: {_cell(item['longest_ns'])}")
     return "\n".join(lines) + "\n"
 
 

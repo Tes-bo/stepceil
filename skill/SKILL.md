@@ -18,7 +18,7 @@ If the range name is not already known, list the names in the export first. Do n
 stepceil ranges REPORT.sqlite --json
 ```
 
-`step_ranges` is that list when MCP is connected. Pass `path`. Account a name only when `count` is 1 and `closed` is 1.
+`step_ranges` is that list when MCP is connected. Pass `path`. Account a name only when `count` is 1 and `closed` is 1. `shortest_ns` and `longest_ns` are how long the closed occurrences were. They do not choose a window. A name that occurs more than once is not a step, even when those two numbers match.
 
 ```
 stepceil REPORT.sqlite --range STEP --json

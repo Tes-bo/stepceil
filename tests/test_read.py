@@ -117,10 +117,22 @@ class ReadTest(unittest.TestCase):
                 load_path(open_ended, "step")
             listed = list_ranges(two)
             self.assertEqual(listed["ranges"], [
-                {"name": "step", "count": 2, "closed": 1},
+                {
+                    "name": "step",
+                    "count": 2,
+                    "closed": 1,
+                    "shortest_ns": 10,
+                    "longest_ns": 10,
+                },
             ])
             self.assertEqual(list_ranges(open_ended)["ranges"], [
-                {"name": "step", "count": 1, "closed": 0},
+                {
+                    "name": "step",
+                    "count": 1,
+                    "closed": 0,
+                    "shortest_ns": None,
+                    "longest_ns": None,
+                },
             ])
 
     def test_demangled_name_is_used_when_short_name_is_absent(self):

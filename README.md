@@ -47,7 +47,7 @@ nvtxRangePop();
 
 ## Which name marks the step
 
-List the names before choosing one. A name can be accounted only when `count` is 1 and `closed` is 1. `closed` is how many of those events have an end timestamp after the start. This command does not pick a window.
+List the names before choosing one. A name can be accounted only when `count` is 1 and `closed` is 1. `closed` is how many of those events have an end timestamp after the start. `shortest_ns` and `longest_ns` are the durations of those closed occurrences. They do not pick a window. `inner` below occurs four times, from 4 ns to 16 ns, so it is not a step.
 
 ```bash
 stepceil ranges examples/names.sqlite
@@ -58,9 +58,13 @@ ranges: 2
 name: inner
 count: 4
 closed: 4
+shortest_ns: 4
+longest_ns: 16
 name: step
 count: 1
 closed: 1
+shortest_ns: 16
+longest_ns: 16
 ```
 
 The MCP tool `step_ranges` takes `path` and returns that list as JSON.
