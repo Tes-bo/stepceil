@@ -344,6 +344,28 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(same_longer["ceiling_refused"], ASSUMPTION_MULTI)
         self.assertEqual(same_longer["overlap"]["second"]["name"], "other")
 
+    def test_overlap_pair_does_not_follow_row_order(self):
+        named = [
+            kernel("b", 0, 50, stream_id=1),
+            kernel("a", 0, 50, stream_id=1),
+            kernel("other", 10, 20, stream_id=2),
+        ]
+        contexts = [
+            kernel("pressure", 0, 10, stream_id=7, context_id=2),
+            kernel("pressure", 0, 10, stream_id=7, context_id=1),
+        ]
+        for ops, first in ((named, "a"), (list(reversed(named)), "a")):
+            ledger = account(window(0, 50, ops))
+            self.assertEqual(ledger["overlap"]["first"]["name"], first)
+            self.assertEqual(ledger["overlap"]["second"]["name"], "other")
+            self.assertEqual(ledger["overlap"]["overlap_ns"], 10)
+        forward = account(window(0, 10, contexts))
+        backward = account(window(0, 10, list(reversed(contexts))))
+        self.assertEqual(forward["overlap"], backward["overlap"])
+        self.assertEqual(forward["overlap"]["first"]["context_id"], 1)
+        self.assertEqual(forward["overlap"]["second"]["context_id"], 2)
+        self.assertEqual(forward["overlap"]["overlap_ns"], 10)
+
     def test_overlap_class_matches_pairs(self):
         rng = random.Random(1)
         for _ in range(40):

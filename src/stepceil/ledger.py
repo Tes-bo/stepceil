@@ -89,6 +89,26 @@ def overlap_class(ops):
     return kind
 
 
+def _order_key(op):
+    """Total order for a device op.
+
+    Start, end, and stream are not enough: an export can return two
+    launches with those three fields equal in either row order. Context
+    and name finish the key so the witness does not follow that order.
+    A missing context sorts after a real one.
+    """
+    context = op.context_id
+    return (
+        op.start_ns,
+        op.end_ns,
+        op.stream_id,
+        context is None,
+        0 if context is None else context,
+        op.kind,
+        op.name,
+    )
+
+
 def _scan_overlap(ops):
     """Classify overlap, and keep the longest pair of that class.
 
@@ -96,7 +116,7 @@ def _scan_overlap(ops):
     the class the ledger reports. Within the class, the longest overlap
     is the witness. Ties keep the earlier overlap.
     """
-    ordered = sorted(ops, key=lambda op: (op.start_ns, op.end_ns, op.stream_id))
+    ordered = sorted(ops, key=_order_key)
     if not ordered:
         return None, None
     current = ordered[0]
@@ -127,9 +147,7 @@ def _ranked_pair(left, right):
 
     Larger overlap wins. An equal overlap keeps the earlier one.
     """
-    if (right.start_ns, right.end_ns, right.stream_id, right.name) < (
-        left.start_ns, left.end_ns, left.stream_id, left.name
-    ):
+    if _order_key(right) < _order_key(left):
         left, right = right, left
     overlap_start = max(left.start_ns, right.start_ns)
     overlap_ns = min(left.end_ns, right.end_ns) - overlap_start
