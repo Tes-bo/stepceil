@@ -380,6 +380,48 @@ class ReadTest(unittest.TestCase):
                 "Stream wait sync",
             )
 
+    def test_runtime_from_another_process_does_not_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "proc.sqlite"
+            _export_sync_runtime(path, "Unknown", [
+                (0, 100, "cudaDeviceSynchronize"),
+                (0, 100, "cudaStreamSynchronize"),
+            ])
+            same = 10 << 24
+            other = 11 << 24
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "ALTER TABLE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION "
+                "ADD COLUMN globalPid INTEGER"
+            )
+            connection.execute(
+                "UPDATE CUPTI_ACTIVITY_KIND_SYNCHRONIZATION SET globalPid = ?",
+                (same,),
+            )
+            connection.execute(
+                "ALTER TABLE CUPTI_ACTIVITY_KIND_RUNTIME ADD COLUMN globalTid INTEGER"
+            )
+            rows = connection.execute(
+                "SELECT rowid, nameId FROM CUPTI_ACTIVITY_KIND_RUNTIME ORDER BY rowid"
+            ).fetchall()
+            for rowid, name_id in rows:
+                value = connection.execute(
+                    "SELECT value FROM StringIds WHERE id = ?",
+                    (name_id,),
+                ).fetchone()[0]
+                process = same if value == "cudaDeviceSynchronize" else other
+                connection.execute(
+                    "UPDATE CUPTI_ACTIVITY_KIND_RUNTIME SET globalTid = ? "
+                    "WHERE rowid = ?",
+                    (process | 7, rowid),
+                )
+            connection.commit()
+            connection.close()
+            self.assertEqual(
+                account(load_path(path, "step"))["longest_blocker"]["name"],
+                "cudaDeviceSynchronize",
+            )
+
     def test_readme_examples_are_the_exports_in_the_repository(self):
         readme = (ROOT / "README.md").read_text()
         examples = ROOT / "examples"

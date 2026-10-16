@@ -165,6 +165,21 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(kept["gpu_busy_ns"], 40)
         self.assertIsNone(kept["ceiling_refused"])
 
+        with self.assertRaises(StepceilError) as raised_sync:
+            account(window(
+                0, 40,
+                [kernel("pressure", 0, 10, process_id=10)],
+                [SyncOp("cudaDeviceSynchronize", 0, 40, process_id=11)],
+            ))
+        self.assertIn("process ids 10, 11", str(raised_sync.exception))
+
+        quiet = account(window(
+            0, 40,
+            [kernel("pressure", 0, 40, process_id=10)],
+            [SyncOp("cudaDeviceSynchronize", 50, 90, process_id=11)],
+        ))
+        self.assertEqual(quiet["decision"], "rewrite pressure")
+
     def test_two_gpus_inside_the_step_refuse(self):
         with self.assertRaisesRegex(Exception, "device ids 0, 1"):
             account(window(0, 100, [

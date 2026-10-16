@@ -277,7 +277,7 @@ That label stays, unless one `CUPTI_ACTIVITY_KIND_RUNTIME` call with the same `c
 
 More than one GPU inside the step exits 2 and prints no ledger. A peer copy counts `srcDeviceId` and `dstDeviceId` as well as `deviceId`. A null peer column is not a GPU. Work that does not meet the NVTX range is ignored, including a peer copy that lies entirely outside it.
 
-More than one process inside the step exits 2 and prints no ledger. Nsight stores that identity in `globalPid`. A null value is not a second process. Stream ids are reused across processes, so another process's kernels are not this step's stream and not its ceiling. A process whose device work lies entirely outside the range is ignored.
+More than one process inside the step exits 2 and prints no ledger. Nsight stores that identity in `globalPid` on device rows and on synchronization records. A null value is not a second process. Stream ids are reused across processes, so another process's kernels are not this step's stream and not its ceiling. A process whose records lie entirely outside the range is ignored. `correlationId` is also reused across processes. A runtime call renames a synchronization only when `globalTid` with its low 24 bits cleared equals that record's `globalPid`.
 
 ## Agent
 

@@ -38,6 +38,9 @@ SYNC_TYPE = {
 }
 
 KERNEL_NAME_COLUMNS = ("shortName", "demangledName", "mangledName")
+# Nsight joins a runtime row to a device row with
+# globalPid == (globalTid & PROCESS_TID_MASK). The low 24 bits are the thread.
+PROCESS_TID_MASK = 0xFFFFFFFFFF000000
 
 
 def load_path(path, range_name):
@@ -245,6 +248,8 @@ def _syncs(connection, strings, start_ns, end_ns, sync_labels):
     selected = ["start", "end", "syncType"]
     if "correlationId" in columns:
         selected.append("correlationId")
+    if "globalPid" in columns:
+        selected.append("globalPid")
     runtime = _runtime_index(connection, strings)
     query = (
         f"SELECT {', '.join(selected)} FROM {table} "
@@ -258,14 +263,20 @@ def _syncs(connection, strings, start_ns, end_ns, sync_labels):
             continue
         sync_type = _required_int(row, "syncType", table)
         name = _sync_name(sync_type, sync_labels)
-        correlation = row["correlationId"] if "correlationId" in row.keys() else None
+        keys = row.keys()
+        process_id = None
+        if "globalPid" in keys and row["globalPid"] is not None:
+            process_id = int(row["globalPid"])
+        correlation = row["correlationId"] if "correlationId" in keys else None
         if correlation is not None:
             runtime_name = _covering_sync_name(
-                runtime, int(correlation), start, end
+                runtime, int(correlation), start, end, process_id,
             )
             if runtime_name:
                 name = runtime_name
-        syncs.append(SyncOp(name=name, start_ns=start, end_ns=end))
+        syncs.append(SyncOp(
+            name=name, start_ns=start, end_ns=end, process_id=process_id,
+        ))
     return syncs
 
 
@@ -335,7 +346,9 @@ def _runtime_index(connection, strings):
 
     CUPTI_ACTIVITY_KIND_SYNCHRONIZATION can label cudaDeviceSynchronize
     as Unknown. The runtime call that covers that record carries the
-    API name. A launch that only overlaps it does not.
+    API name. A launch that only overlaps it does not. Correlation ids
+    are reused across processes, so a call from another process does not
+    count when both sides name a process.
     """
     table = "CUPTI_ACTIVITY_KIND_RUNTIME"
     if not _has_table(connection, table):
@@ -344,23 +357,36 @@ def _runtime_index(connection, strings):
     needed = ("start", "end", "correlationId", "nameId")
     if any(name not in columns for name in needed):
         return {}
+    has_tid = "globalTid" in columns
+    selected = list(needed)
+    if has_tid:
+        selected.append("globalTid")
     grouped = {}
-    query = f"SELECT {', '.join(needed)} FROM {table}"
+    query = f"SELECT {', '.join(selected)} FROM {table}"
     for row in connection.execute(query):
         if row["correlationId"] is None or row["start"] is None or row["end"] is None:
             continue
         name = _lookup_string(row["nameId"], strings)
         if not name or name == "unresolved" or name.startswith("unresolved:"):
             continue
+        process_id = None
+        if has_tid and row["globalTid"] is not None:
+            process_id = int(row["globalTid"]) & PROCESS_TID_MASK
         grouped.setdefault(int(row["correlationId"]), []).append(
-            (int(row["start"]), int(row["end"]), name)
+            (int(row["start"]), int(row["end"]), name, process_id)
         )
     return grouped
 
 
-def _covering_sync_name(runtime, correlation_id, start, end):
+def _covering_sync_name(runtime, correlation_id, start, end, process_id):
     names = []
-    for call_start, call_end, name in runtime.get(correlation_id, ()):
+    for call_start, call_end, name, call_process in runtime.get(correlation_id, ()):
+        if (
+            process_id is not None
+            and call_process is not None
+            and call_process != process_id
+        ):
+            continue
         covers = call_start <= start and call_end >= end
         if covers and _is_sync_api(name) and name not in names:
             names.append(name)

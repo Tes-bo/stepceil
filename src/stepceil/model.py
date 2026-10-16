@@ -24,6 +24,7 @@ class SyncOp:
     name: str
     start_ns: int
     end_ns: int
+    process_id: int | None = None
 
 
 @dataclass(frozen=True)

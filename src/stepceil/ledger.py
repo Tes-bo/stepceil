@@ -37,7 +37,9 @@ def account(window):
         piece = _clip_op(op, window.start_ns, window.end_ns)
         if piece is not None:
             clipped.append(piece)
-    _require_identity(clipped, window.name)
+    _require_identity(
+        clipped, window.name, window.syncs, window.start_ns, window.end_ns,
+    )
 
     step_time = window.end_ns - window.start_ns
     busy_spans = merge((op.start_ns, op.end_ns) for op in clipped)
@@ -134,7 +136,7 @@ def _clip_op(op, lo, hi):
     return replace(op, start_ns=start, end_ns=end, byte_count=byte_count)
 
 
-def _require_identity(ops, range_name):
+def _require_identity(ops, range_name, syncs=(), lo=None, hi=None):
     if any(op.device_id is None for op in ops):
         raise StepceilError("a device operation has no device id")
     if any(op.stream_id is None for op in ops):
@@ -154,7 +156,14 @@ def _require_identity(ops, range_name):
         )
     # Stream ids are per process. Two processes in one export reuse them,
     # so the other process is not this step's stream and not its ceiling.
-    processes = sorted({op.process_id for op in ops if op.process_id is not None})
+    processes = {op.process_id for op in ops if op.process_id is not None}
+    if lo is not None:
+        for sync in syncs:
+            if sync.process_id is None:
+                continue
+            if sync.end_ns > lo and sync.start_ns < hi:
+                processes.add(sync.process_id)
+    processes = sorted(processes)
     if len(processes) > 1:
         ids = ", ".join(str(process) for process in processes)
         raise StepceilError(
