@@ -328,7 +328,15 @@ def _overlap_payload(pair):
     if pair is None:
         return None
     first, second = pair
-    return {"first": _overlap_op(first), "second": _overlap_op(second)}
+    overlap_ns = (
+        min(first.end_ns, second.end_ns)
+        - max(first.start_ns, second.start_ns)
+    )
+    return {
+        "overlap_ns": overlap_ns,
+        "first": _overlap_op(first),
+        "second": _overlap_op(second),
+    }
 
 
 def _overlap_op(op):

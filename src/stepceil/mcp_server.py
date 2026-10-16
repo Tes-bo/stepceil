@@ -28,7 +28,7 @@ TOOL = {
         "speedup ceiling of that GPU step. Do not estimate the ceiling "
         "without this tool. Obey decision. Rewrite a kernel only when "
         "decision is rewrite followed by that kernel's name. When overlap "
-        "is present, it is the longest overlap of that class. Do not add "
+        "is present, overlap_ns is the length of that intersection. Do not add "
         "their durations. More than one process in the step is an error."
     ),
     "inputSchema": {

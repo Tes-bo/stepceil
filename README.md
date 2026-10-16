@@ -99,6 +99,7 @@ hottest_kernel.source: none
 ceiling_ns: 80
 allow_rewrite: false
 ceiling_refused: none
+overlap.overlap_ns: none
 overlap.first.kind: none
 overlap.first.name: none
 overlap.first.start_ns: none
@@ -152,7 +153,7 @@ decision: change context synchronize first
 
 ## Overlap is not a bigger ceiling
 
-`alpha` and `beta` each run 60 ns, on two streams, and overlap. Adding them produces 120 ns, which is longer than the 100 ns step. The GPU was busy for the union, 100 ns. This version withholds the ceiling instead of publishing the inflated sum. `ceiling_ns` is null and `allow_rewrite` is false. Busy and idle are still reported. `overlap` names the two clipped launches: `alpha` on stream 1 and `beta` on stream 2. Do not add those durations.
+`alpha` and `beta` each run 60 ns, on two streams, and overlap. Adding them produces 120 ns, which is longer than the 100 ns step. The GPU was busy for the union, 100 ns. This version withholds the ceiling instead of publishing the inflated sum. `ceiling_ns` is null and `allow_rewrite` is false. Busy and idle are still reported. `overlap` names the two clipped launches: `alpha` on stream 1 and `beta` on stream 2. `overlap.overlap_ns` is their intersection, 20 ns. Do not add the two durations.
 
 ![Two 60 ns kernels overlap, so their sum is 120 ns and the union is 100 ns. The ceiling is withheld.](docs/figures/overlap-withheld.svg)
 
@@ -180,6 +181,7 @@ hottest_kernel.source: none
 ceiling_ns: none
 allow_rewrite: false
 ceiling_refused: overlapping device work on more than one stream
+overlap.overlap_ns: 20
 overlap.first.kind: kernel
 overlap.first.name: alpha
 overlap.first.start_ns: 0
@@ -254,7 +256,7 @@ When nothing on the device overlaps:
 
 `allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
 
-Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. `overlap` names the clipped pair of that class with the longest overlap. Ties keep the earlier one. A cross-stream pair is kept when both kinds of overlap are present, even when a same-stream overlap is longer. Adding the two durations is not a ceiling. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
+Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. `overlap` names the clipped pair of that class with the longest overlap. `overlap.overlap_ns` is that intersection. Ties keep the earlier one. A cross-stream pair is kept when both kinds of overlap are present, even when a same-stream overlap is longer. Adding the two durations is not a ceiling. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
 
 Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line. `longest_blocker.bytes` is the size of a copy or memset when that row has a `bytes` column and the transfer lies entirely inside the step. A kernel, synchronize, gap, a missing size, or a transfer that crosses the NVTX boundary is null: the column counts the whole transfer, not the clipped piece. Do not invent one.
 

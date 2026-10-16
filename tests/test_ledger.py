@@ -62,6 +62,7 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["gpu_idle_ns"], 0)
         self.assertIsNone(ledger["ceiling_ns"])
         self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
+        self.assertEqual(ledger["overlap"]["overlap_ns"], 20)
         self.assertFalse(ledger["allow_rewrite"])
         readme = (ROOT / "README.md").read_text()
         self.assertIn(render_text(ledger), readme)
@@ -386,6 +387,7 @@ class LedgerTest(unittest.TestCase):
                     - max(pair["first"]["start_ns"], pair["second"]["start_ns"])
                 )
                 self.assertEqual(overlap_ns, _max_overlap_ns(ops, kind))
+                self.assertEqual(pair["overlap_ns"], overlap_ns)
 
 
 def _max_overlap_ns(ops, kind):

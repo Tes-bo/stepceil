@@ -88,7 +88,8 @@ def render_text(ledger):
 
 
 def _overlap_lines(overlap):
-    lines = []
+    overlap_ns = None if overlap is None else overlap["overlap_ns"]
+    lines = [f"overlap.overlap_ns: {_cell(overlap_ns)}"]
     for side in ("first", "second"):
         obj = None if overlap is None else overlap[side]
         lines.extend(_object_lines(
