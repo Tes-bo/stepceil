@@ -327,6 +327,22 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(clipped["overlap"]["second"]["start_ns"], 30)
         self.assertEqual(clipped["overlap"]["second"]["end_ns"], 50)
 
+        longest = account(window(0, 100, [
+            kernel("wide", 0, 100, stream_id=1),
+            kernel("early", 0, 10, stream_id=2),
+            kernel("long", 20, 90, stream_id=3),
+        ]))
+        self.assertEqual(longest["overlap"]["first"]["name"], "wide")
+        self.assertEqual(longest["overlap"]["second"]["name"], "long")
+
+        same_longer = account(window(0, 100, [
+            kernel("wide", 0, 100, stream_id=1),
+            kernel("nested", 0, 80, stream_id=1),
+            kernel("other", 90, 100, stream_id=2),
+        ]))
+        self.assertEqual(same_longer["ceiling_refused"], ASSUMPTION_MULTI)
+        self.assertEqual(same_longer["overlap"]["second"]["name"], "other")
+
     def test_overlap_class_matches_pairs(self):
         rng = random.Random(1)
         for _ in range(40):
@@ -365,6 +381,33 @@ class LedgerTest(unittest.TestCase):
                     self.assertNotEqual(left, right)
                 else:
                     self.assertEqual(left, right)
+                overlap_ns = (
+                    min(pair["first"]["end_ns"], pair["second"]["end_ns"])
+                    - max(pair["first"]["start_ns"], pair["second"]["start_ns"])
+                )
+                self.assertEqual(overlap_ns, _max_overlap_ns(ops, kind))
+
+
+def _max_overlap_ns(ops, kind):
+    best = 0
+    for index, left in enumerate(ops):
+        for right in ops[index + 1:]:
+            if left.start_ns >= right.end_ns or right.start_ns >= left.end_ns:
+                continue
+            left_key = (left.context_id, left.stream_id)
+            right_key = (right.context_id, right.stream_id)
+            crossed = left_key != right_key
+            if kind == "multi" and not crossed:
+                continue
+            if kind == "same" and crossed:
+                continue
+            overlap_ns = (
+                min(left.end_ns, right.end_ns)
+                - max(left.start_ns, right.start_ns)
+            )
+            if overlap_ns > best:
+                best = overlap_ns
+    return best
 
 
 def _reference_overlap(ops):

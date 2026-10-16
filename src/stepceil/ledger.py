@@ -90,39 +90,51 @@ def overlap_class(ops):
 
 
 def _scan_overlap(ops):
-    """Classify overlap, and keep the pair that first establishes that class.
+    """Classify overlap, and keep the longest pair of that class.
 
-    Operations are ordered by start. The first one that intersects an
-    operation already open is the witness. A cross-stream pair wins over
-    a same-stream pair, because that is the class the ledger reports.
+    A cross-stream pair wins over a same-stream pair, because that is
+    the class the ledger reports. Within the class, the longest overlap
+    is the witness. Ties keep the earlier overlap.
     """
     ordered = sorted(ops, key=lambda op: (op.start_ns, op.end_ns, op.stream_id))
     if not ordered:
         return None, None
     current = ordered[0]
-    multi = False
-    same = False
-    witness_multi = None
-    witness_same = None
+    best_multi = None
+    best_same = None
     for nxt in ordered[1:]:
         if nxt.start_ns < current.end_ns:
+            ranked = _ranked_pair(current, nxt)
             if _stream_key(nxt) != _stream_key(current):
-                multi = True
-                if witness_multi is None:
-                    witness_multi = (current, nxt)
+                if best_multi is None or ranked[0] > best_multi[0]:
+                    best_multi = ranked
             else:
-                same = True
-                if witness_same is None:
-                    witness_same = (current, nxt)
+                if best_same is None or ranked[0] > best_same[0]:
+                    best_same = ranked
             if nxt.end_ns > current.end_ns:
                 current = nxt
         else:
             current = nxt
-    if multi:
-        return "multi", witness_multi
-    if same:
-        return "same", witness_same
+    if best_multi is not None:
+        return "multi", best_multi[1]
+    if best_same is not None:
+        return "same", best_same[1]
     return None, None
+
+
+def _ranked_pair(left, right):
+    """Return a sort key and the pair, earlier start first.
+
+    Larger overlap wins. An equal overlap keeps the earlier one.
+    """
+    if (right.start_ns, right.end_ns, right.stream_id, right.name) < (
+        left.start_ns, left.end_ns, left.stream_id, left.name
+    ):
+        left, right = right, left
+    overlap_start = max(left.start_ns, right.start_ns)
+    overlap_ns = min(left.end_ns, right.end_ns) - overlap_start
+    rank = (overlap_ns, -overlap_start, -left.start_ns, left.name, right.name)
+    return rank, (left, right)
 
 
 def _clip_op(op, lo, hi):
