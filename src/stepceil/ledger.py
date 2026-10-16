@@ -55,15 +55,14 @@ def account(window):
         return _refused(window, busy, idle, ASSUMPTION_SAME, overlap_pair)
 
     holes = complement(busy_spans, window.start_ns, window.end_ns)
-    sync_pieces, gap_pieces = _idle_pieces(holes, window.syncs)
     candidates = [_op_candidate(op) for op in clipped]
     candidates.extend(
         _candidate("sync", sync.name, start, end)
-        for start, end, sync in sync_pieces
+        for start, end, sync in _sync_pieces(holes, window.syncs)
     )
     candidates.extend(
         _candidate("gap", GPU_IDLE_NAME, start, end)
-        for start, end in gap_pieces
+        for start, end in _gap_pieces(holes, window.syncs)
     )
     longest = _longest(candidates)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
@@ -206,59 +205,38 @@ def _stream_key(op):
     return (op.context_id, op.stream_id)
 
 
-def _idle_pieces(holes, syncs):
-    sync_pieces = []
-    gap_pieces = []
-    for hole_start, hole_end in holes:
-        covered, gaps = _split_hole(hole_start, hole_end, syncs)
-        sync_pieces.extend(covered)
-        gap_pieces.extend(gaps)
-    return sync_pieces, merge(gap_pieces)
+def _sync_pieces(holes, syncs):
+    """Idle covered by each synchronization, one contiguous piece at a time.
 
-
-def _split_hole(hole_start, hole_end, syncs):
-    cuts = []
+    A shorter call that overlaps a longer one does not take that idle away.
+    The ledger reports the longest piece, so both calls keep their own
+    coverage. A kernel, copy, or memset between two pieces still splits
+    them: those pieces are not one blocker.
+    """
+    pieces = []
     for sync in syncs:
-        start = max(sync.start_ns, hole_start)
-        end = min(sync.end_ns, hole_end)
-        if end > start:
-            cuts.append((start, end, sync))
-    if not cuts:
-        return [], [(hole_start, hole_end)]
-
-    points = {hole_start, hole_end}
-    for start, end, _sync in cuts:
-        points.add(start)
-        points.add(end)
-    bounds = sorted(points)
-    raw_sync = []
-    raw_gap = []
-    for start, end in zip(bounds, bounds[1:]):
-        if end <= start:
-            continue
-        covering = [
-            sync for cut_start, cut_end, sync in cuts
-            if cut_start <= start and cut_end >= end
-        ]
-        if not covering:
-            raw_gap.append((start, end))
-            continue
-        chosen = min(covering, key=lambda sync: (sync.start_ns, sync.name))
-        raw_sync.append((start, end, chosen))
-    return _merge_sync(raw_sync), raw_gap
+        spans = []
+        for hole_start, hole_end in holes:
+            start = max(sync.start_ns, hole_start)
+            end = min(sync.end_ns, hole_end)
+            if end > start:
+                spans.append((start, end))
+        for start, end in merge(spans):
+            pieces.append((start, end, sync))
+    return pieces
 
 
-def _merge_sync(parts):
-    if not parts:
-        return []
-    merged = [parts[0]]
-    for start, end, sync in parts[1:]:
-        previous_start, previous_end, previous = merged[-1]
-        if sync is previous and start == previous_end:
-            merged[-1] = (previous_start, end, sync)
-        else:
-            merged.append((start, end, sync))
-    return merged
+def _gap_pieces(holes, syncs):
+    gaps = []
+    for hole_start, hole_end in holes:
+        covered = []
+        for sync in syncs:
+            start = max(sync.start_ns, hole_start)
+            end = min(sync.end_ns, hole_end)
+            if end > start:
+                covered.append((start, end))
+        gaps.extend(complement(merge(covered), hole_start, hole_end))
+    return merge(gaps)
 
 
 def _op_candidate(op):

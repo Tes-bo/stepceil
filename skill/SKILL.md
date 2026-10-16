@@ -36,6 +36,7 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 - If the command reports more than one process, capture one process. Stream ids from separate processes are not one stream. Do not look for a same-stream overlap. A runtime call from another process does not name a synchronization.
 - `source` is null in this version. Do not invent a file and line.
 - When the blocker is a copy or memset, `longest_blocker.bytes` is its size from the export only if that transfer lies entirely inside the step. Null means the export did not say, or the transfer crosses the boundary. Do not invent a size.
+- A synchronization's blocking time is the idle that call covers. Another synchronization on the same idle does not shorten it. A kernel, copy, or memset still splits it. Do not add the pieces.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
 
 ```

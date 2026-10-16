@@ -254,6 +254,31 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["longest_blocker"]["name"], "context synchronize")
         self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 80)
 
+    def test_shorter_sync_does_not_shorten_a_longer_one(self):
+        forward = [
+            SyncOp("a", 0, 30),
+            SyncOp("b", 0, 100),
+        ]
+        backward = list(reversed(forward))
+        ledgers = [
+            account(window(0, 100, syncs=forward)),
+            account(window(0, 100, syncs=backward)),
+        ]
+        for ledger in ledgers:
+            self.assertEqual(ledger["longest_blocker"]["name"], "b")
+            self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 100)
+            self.assertEqual(ledger["longest_blocker"]["start_ns"], 0)
+            self.assertEqual(ledger["longest_blocker"]["end_ns"], 100)
+        split = account(window(
+            0, 100,
+            [kernel("pressure", 40, 60)],
+            [SyncOp("context synchronize", 0, 100)],
+        ))
+        self.assertEqual(split["longest_blocker"]["kind"], "sync")
+        self.assertEqual(split["longest_blocker"]["blocking_ns"], 40)
+        self.assertEqual(split["longest_blocker"]["start_ns"], 0)
+        self.assertEqual(split["longest_blocker"]["end_ns"], 40)
+
     def test_hottest_tie_uses_the_earlier_launch(self):
         ledger = account(window(0, 100, [
             kernel("alpha", 50, 90),

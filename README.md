@@ -251,7 +251,7 @@ When nothing on the device overlaps:
 
 - Each clipped launch blocks the step for its own duration.
 - The ceiling of a kernel name is the sum of its clipped launches, not the longest one.
-- A synchronization call blocks the step only where it covers idle time. Time already covered by a kernel, copy, or memset stays on that operation.
+- A synchronization call blocks the step only where it covers idle time. Time already covered by a kernel, copy, or memset stays on that operation. Another synchronization that overlaps the same idle does not shorten that piece. The longest blocker is the longest piece, not the sum of the pieces.
 - Idle time with no synchronization call is a gap named `gpu idle`.
 
 `allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
