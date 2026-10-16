@@ -95,7 +95,7 @@ def _overlap_lines(overlap):
         lines.extend(_object_lines(
             f"overlap.{side}",
             obj,
-            ("kind", "name", "start_ns", "end_ns", "stream_id", "context_id"),
+            ("kind", "name", "start_ns", "end_ns", "stream_id", "context_id", "bytes"),
         ))
     return lines
 

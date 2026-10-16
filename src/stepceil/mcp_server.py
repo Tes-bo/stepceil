@@ -29,7 +29,9 @@ TOOL = {
         "without this tool. Obey decision. Rewrite a kernel only when "
         "decision is rewrite followed by that kernel's name. When overlap "
         "is present, overlap_ns is the length of that intersection. Do not add "
-        "their durations. More than one process in the step is an error."
+        "their durations or their byte counts. bytes is null unless that "
+        "side is a copy or memset that lies entirely inside the step. "
+        "More than one process in the step is an error."
     ),
     "inputSchema": {
         "type": "object",

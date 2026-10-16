@@ -343,6 +343,7 @@ def _overlap_op(op):
         "end_ns": op.end_ns,
         "stream_id": op.stream_id,
         "context_id": op.context_id,
+        "bytes": op.byte_count,
     }
 
 

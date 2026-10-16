@@ -391,6 +391,29 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(forward["overlap"]["second"]["context_id"], 2)
         self.assertEqual(forward["overlap"]["overlap_ns"], 10)
 
+    def test_overlap_keeps_bytes_only_when_the_transfer_is_inside(self):
+        inside = account(window(0, 100, [
+            DeviceOp("memcpy", "memcpy HtoD", 0, 60, 1, 0, 1, (), 4096),
+            DeviceOp("memcpy", "memcpy DtoH", 40, 100, 2, 0, 1, (), 8192),
+        ]))
+        self.assertEqual(inside["overlap"]["overlap_ns"], 20)
+        self.assertEqual(inside["overlap"]["first"]["bytes"], 4096)
+        self.assertEqual(inside["overlap"]["second"]["bytes"], 8192)
+        clipped = account(window(0, 50, [
+            DeviceOp("memcpy", "memcpy HtoD", -10, 40, 1, 0, 1, (), 4096),
+            DeviceOp("memcpy", "memcpy DtoH", 30, 80, 2, 0, 1, (), 8192),
+        ]))
+        self.assertEqual(clipped["overlap"]["first"]["start_ns"], 0)
+        self.assertEqual(clipped["overlap"]["first"]["end_ns"], 40)
+        self.assertEqual(clipped["overlap"]["second"]["start_ns"], 30)
+        self.assertEqual(clipped["overlap"]["second"]["end_ns"], 50)
+        self.assertIsNone(clipped["overlap"]["first"]["bytes"])
+        self.assertIsNone(clipped["overlap"]["second"]["bytes"])
+        self.assertIsNone(account(window(0, 100, [
+            kernel("alpha", 0, 60, stream_id=1),
+            kernel("beta", 40, 100, stream_id=2),
+        ]))["overlap"]["first"]["bytes"])
+
     def test_overlap_class_matches_pairs(self):
         rng = random.Random(1)
         for _ in range(40):

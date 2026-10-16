@@ -106,12 +106,14 @@ overlap.first.start_ns: none
 overlap.first.end_ns: none
 overlap.first.stream_id: none
 overlap.first.context_id: none
+overlap.first.bytes: none
 overlap.second.kind: none
 overlap.second.name: none
 overlap.second.start_ns: none
 overlap.second.end_ns: none
 overlap.second.stream_id: none
 overlap.second.context_id: none
+overlap.second.bytes: none
 rewrite_threshold_numerator: 1
 rewrite_threshold_denominator: 10
 decision: change context synchronize first
@@ -153,7 +155,7 @@ decision: change context synchronize first
 
 ## Overlap is not a bigger ceiling
 
-`alpha` and `beta` each run 60 ns, on two streams, and overlap. Adding them produces 120 ns, which is longer than the 100 ns step. The GPU was busy for the union, 100 ns. This version withholds the ceiling instead of publishing the inflated sum. `ceiling_ns` is null and `allow_rewrite` is false. Busy and idle are still reported. `overlap` names the two clipped launches: `alpha` on stream 1 and `beta` on stream 2. `overlap.overlap_ns` is their intersection, 20 ns. Do not add the two durations.
+`alpha` and `beta` each run 60 ns, on two streams, and overlap. Adding them produces 120 ns, which is longer than the 100 ns step. The GPU was busy for the union, 100 ns. This version withholds the ceiling instead of publishing the inflated sum. `ceiling_ns` is null and `allow_rewrite` is false. Busy and idle are still reported. `overlap` names the two clipped launches: `alpha` on stream 1 and `beta` on stream 2. `overlap.overlap_ns` is their intersection, 20 ns. Do not add the two durations. `bytes` on each side is that row's size when the side is a copy or memset that lies entirely inside the step. A kernel, a missing size, or a transfer that crosses the boundary is null. Do not add the two sizes.
 
 ![Two 60 ns kernels overlap, so their sum is 120 ns and the union is 100 ns. The ceiling is withheld.](docs/figures/overlap-withheld.svg)
 
@@ -188,12 +190,14 @@ overlap.first.start_ns: 0
 overlap.first.end_ns: 60
 overlap.first.stream_id: 1
 overlap.first.context_id: 1
+overlap.first.bytes: none
 overlap.second.kind: kernel
 overlap.second.name: beta
 overlap.second.start_ns: 40
 overlap.second.end_ns: 100
 overlap.second.stream_id: 2
 overlap.second.context_id: 1
+overlap.second.bytes: none
 rewrite_threshold_numerator: 1
 rewrite_threshold_denominator: 10
 decision: do not rewrite a kernel from this report
@@ -258,7 +262,7 @@ When nothing on the device overlaps:
 
 Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. `overlap` names the clipped pair of that class with the longest overlap. `overlap.overlap_ns` is that intersection. Ties keep the earlier one. The pair does not follow the order of rows in the export. A cross-stream pair is kept when both kinds of overlap are present, even when a same-stream overlap is longer. Adding the two durations is not a ceiling. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
 
-Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line. `longest_blocker.bytes` is the size of a copy or memset when that row has a `bytes` column and the transfer lies entirely inside the step. A kernel, synchronize, gap, a missing size, or a transfer that crosses the NVTX boundary is null: the column counts the whole transfer, not the clipped piece. Do not invent one.
+Times are nanoseconds. `source` is null. These sqlite tables do not carry a file and line. `longest_blocker.bytes`, `overlap.first.bytes`, and `overlap.second.bytes` are the size of a copy or memset when that row has a `bytes` column and the transfer lies entirely inside the step. A kernel, synchronize, gap, a missing size, or a transfer that crosses the NVTX boundary is null: the column counts the whole transfer, not the clipped piece. Do not invent one, and do not add the two overlap sizes.
 
 ## Input
 
