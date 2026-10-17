@@ -29,12 +29,12 @@ def render_diff_text(report):
     lines.extend(_object_lines(
         "before_longest_blocker",
         report["before_longest_blocker"],
-        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
+        ("kind", "name", "symbol", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
     lines.extend(_object_lines(
         "after_longest_blocker",
         report["after_longest_blocker"],
-        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
+        ("kind", "name", "symbol", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
     lines.append(f"before_ceiling_ns: {_cell(report['before_ceiling_ns'])}")
     lines.append(f"after_ceiling_ns: {_cell(report['after_ceiling_ns'])}")
@@ -64,12 +64,12 @@ def render_text(ledger):
     lines.extend(_object_lines(
         "longest_blocker",
         ledger["longest_blocker"],
-        ("kind", "name", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
+        ("kind", "name", "symbol", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
     lines.extend(_object_lines(
         "hottest_kernel",
         ledger["hottest_kernel"],
-        ("name", "ceiling_ns", "instances", "source"),
+        ("name", "symbol", "ceiling_ns", "instances", "source"),
     ))
     lines.append(f"ceiling_ns: {_cell(ledger['ceiling_ns'])}")
     lines.append(f"allow_rewrite: {_cell(ledger['allow_rewrite'])}")

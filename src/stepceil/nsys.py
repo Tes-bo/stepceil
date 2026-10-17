@@ -5,6 +5,7 @@ not open a `.nsys-rep`.
 """
 
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 from stepceil.errors import StepceilError
@@ -38,6 +39,7 @@ SYNC_TYPE = {
 }
 
 KERNEL_NAME_COLUMNS = ("shortName", "demangledName", "mangledName")
+SYMBOL_COLUMNS = ("mangledName", "demangledName")
 # Nsight joins a runtime row to a device row with
 # globalPid == (globalTid & PROCESS_TID_MASK). The low 24 bits are the thread.
 PROCESS_TID_MASK = 0xFFFFFFFFFF000000
@@ -189,19 +191,40 @@ def _kernels(connection, strings, start_ns, end_ns):
         return []
     columns = _columns(connection, table)
     _require_columns(connection, table, ("start", "end", "deviceId", "streamId"))
-    name_column = next((name for name in KERNEL_NAME_COLUMNS if name in columns), None)
-    if name_column is None:
+    name_columns = tuple(name for name in KERNEL_NAME_COLUMNS if name in columns)
+    if not name_columns:
         raise StepceilError(f"{table} is missing a kernel name column")
-    rows = _device_rows(connection, table, columns, start_ns, end_ns, (name_column,))
+    name_column = name_columns[0]
+    symbol_columns = tuple(
+        name for name in SYMBOL_COLUMNS if name in name_columns
+    )
+    rows = _device_rows(connection, table, columns, start_ns, end_ns, name_columns)
     ops = []
     for row in rows:
-        ops.append(_device_op(
+        op = _device_op(
             "kernel",
             _lookup_string(row[name_column], strings),
             row,
             table,
-        ))
+        )
+        ops.append(replace(op, symbol=_kernel_symbol(row, symbol_columns, strings)))
     return ops
+
+
+def _kernel_symbol(row, symbol_columns, strings):
+    """The full symbol of one launch, or None when the export has none.
+
+    shortName drops template arguments, so two instances can share it.
+    mangledName, then demangledName, tells them apart.
+    """
+    for column in symbol_columns:
+        value = row[column]
+        if value is None:
+            continue
+        text = _lookup_string(value, strings)
+        if text and not text.startswith("unresolved"):
+            return text
+    return None
 
 
 def _memcpys(connection, start_ns, end_ns, copy_labels):

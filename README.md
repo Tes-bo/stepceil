@@ -87,12 +87,14 @@ gpu_idle_ns: 920
 assumption: single stream, no overlapping device work
 longest_blocker.kind: sync
 longest_blocker.name: context synchronize
+longest_blocker.symbol: none
 longest_blocker.start_ns: 80
 longest_blocker.end_ns: 1000
 longest_blocker.blocking_ns: 920
 longest_blocker.source: none
 longest_blocker.bytes: none
 hottest_kernel.name: pressure
+hottest_kernel.symbol: none
 hottest_kernel.ceiling_ns: 80
 hottest_kernel.instances: 1
 hottest_kernel.source: none
@@ -131,6 +133,7 @@ decision: change context synchronize first
   "longest_blocker": {
     "kind": "sync",
     "name": "context synchronize",
+    "symbol": null,
     "start_ns": 80,
     "end_ns": 1000,
     "blocking_ns": 920,
@@ -139,6 +142,7 @@ decision: change context synchronize first
   },
   "hottest_kernel": {
     "name": "pressure",
+    "symbol": null,
     "ceiling_ns": 80,
     "instances": 1,
     "source": null
@@ -171,12 +175,14 @@ gpu_idle_ns: 0
 assumption: overlapping device work on more than one stream
 longest_blocker.kind: none
 longest_blocker.name: none
+longest_blocker.symbol: none
 longest_blocker.start_ns: none
 longest_blocker.end_ns: none
 longest_blocker.blocking_ns: none
 longest_blocker.source: none
 longest_blocker.bytes: none
 hottest_kernel.name: none
+hottest_kernel.symbol: none
 hottest_kernel.ceiling_ns: none
 hottest_kernel.instances: none
 hottest_kernel.source: none
@@ -223,6 +229,7 @@ step_time_ns_delta: -800
 faster: true
 before_longest_blocker.kind: sync
 before_longest_blocker.name: context synchronize
+before_longest_blocker.symbol: none
 before_longest_blocker.start_ns: 80
 before_longest_blocker.end_ns: 1000
 before_longest_blocker.blocking_ns: 920
@@ -230,6 +237,7 @@ before_longest_blocker.source: none
 before_longest_blocker.bytes: none
 after_longest_blocker.kind: sync
 after_longest_blocker.name: context synchronize
+after_longest_blocker.symbol: none
 after_longest_blocker.start_ns: 80
 after_longest_blocker.end_ns: 200
 after_longest_blocker.blocking_ns: 120
@@ -275,7 +283,7 @@ Times are nanoseconds. `source` is null. These sqlite tables do not carry a file
 | `CUPTI_ACTIVITY_KIND_MEMSET` | no | memsets |
 | `CUPTI_ACTIVITY_KIND_SYNCHRONIZATION` | no | host synchronization calls |
 
-Kernel names come from `shortName`, then `demangledName`, then `mangledName`. NVTX text is the `text` column when it is non-empty, otherwise `StringIds` at `textId`.
+Kernel names come from `shortName`, then `demangledName`, then `mangledName`. `symbol` is `mangledName`, then `demangledName`, or null when the export has neither. A short name drops template arguments, so two kernels can share it. The ceiling sums launches with the same name and the same symbol, and `rewrite` needs the longest blocker to be that same symbol. NVTX text is the `text` column when it is non-empty, otherwise `StringIds` at `textId`.
 
 Memcpy and synchronization names come from `ENUM_CUDA_MEMCPY_OPER` and `ENUM_CUPTI_SYNC_TYPE` when those tables are in the export. Nsight Systems 2022.4 numbers memcpy kinds differently from older CUPTI headers, so the file's label wins. Exports without those tables keep stepceil's short names, such as `memcpy HtoD` and `context synchronize`.
 

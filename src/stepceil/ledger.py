@@ -241,20 +241,26 @@ def _gap_pieces(holes, syncs):
 
 def _op_candidate(op):
     return _candidate(
-        op.kind, op.name, op.start_ns, op.end_ns, op.byte_count
+        op.kind, op.name, op.start_ns, op.end_ns, op.byte_count, op.symbol
     )
 
 
-def _candidate(kind, name, start, end, byte_count=None):
+def _candidate(kind, name, start, end, byte_count=None, symbol=None):
     return {
         "kind": kind,
         "name": name,
+        "symbol": symbol,
         "start_ns": start,
         "end_ns": end,
         "blocking_ns": end - start,
         "source": None,
         "bytes": byte_count,
     }
+
+
+def _kernel_key(name, symbol):
+    """One kernel. A short name alone is not one when a symbol is known."""
+    return (name, symbol)
 
 
 def _longest(candidates):
@@ -276,13 +282,21 @@ def _hottest(kernels):
         return None, 0
     groups = {}
     for op in kernels:
+        key = _kernel_key(op.name, op.symbol)
         duration = op.end_ns - op.start_ns
-        ceiling, count, first = groups.get(op.name, (0, 0, op.start_ns))
-        groups[op.name] = (ceiling + duration, count + 1, min(first, op.start_ns))
-    name = min(groups, key=lambda item: (-groups[item][0], groups[item][2], item))
-    ceiling, count, _first = groups[name]
+        ceiling, count, first = groups.get(key, (0, 0, op.start_ns))
+        groups[key] = (ceiling + duration, count + 1, min(first, op.start_ns))
+    key = min(
+        groups,
+        key=lambda item: (
+            -groups[item][0], groups[item][2], item[0], item[1] or "",
+        ),
+    )
+    ceiling, count, _first = groups[key]
+    name, symbol = key
     return {
         "name": name,
+        "symbol": symbol,
         "ceiling_ns": ceiling,
         "instances": count,
         "source": None,
@@ -306,7 +320,8 @@ def _decision(longest, hottest, allow, refused):
         allow
         and hottest is not None
         and longest["kind"] == "kernel"
-        and longest["name"] == hottest["name"]
+        and _kernel_key(longest["name"], longest["symbol"])
+        == _kernel_key(hottest["name"], hottest["symbol"])
     ):
         return f"rewrite {hottest['name']}"
     return f"change {longest['name']} first"

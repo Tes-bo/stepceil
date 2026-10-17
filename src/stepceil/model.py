@@ -15,6 +15,8 @@ class DeviceOp:
     peer_device_ids: tuple[int, ...] = ()
     byte_count: int | None = None
     process_id: int | None = None
+    # Full kernel symbol. Template instances can share one short name.
+    symbol: str | None = None
 
 
 @dataclass(frozen=True)

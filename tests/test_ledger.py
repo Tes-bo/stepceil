@@ -279,6 +279,25 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(split["longest_blocker"]["start_ns"], 0)
         self.assertEqual(split["longest_blocker"]["end_ns"], 40)
 
+    def test_short_name_shared_by_two_symbols_is_two_kernels(self):
+        def launch(symbol, start, end):
+            return DeviceOp(
+                "kernel", "reduce", start, end, 1, 0, 1,
+                symbol=symbol,
+            )
+
+        ledger = account(window(0, 100, [
+            launch("_Z3sumIlEv", 0, 30),
+            launch("_Z3sumIiEv", 30, 55),
+            launch("_Z3sumIiEv", 55, 80),
+        ]))
+        self.assertEqual(ledger["hottest_kernel"]["symbol"], "_Z3sumIiEv")
+        self.assertEqual(ledger["ceiling_ns"], 50)
+        self.assertEqual(ledger["hottest_kernel"]["instances"], 2)
+        self.assertEqual(ledger["longest_blocker"]["symbol"], "_Z3sumIlEv")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 30)
+        self.assertEqual(ledger["decision"], "change reduce first")
+
     def test_hottest_tie_uses_the_earlier_launch(self):
         ledger = account(window(0, 100, [
             kernel("alpha", 50, 90),
