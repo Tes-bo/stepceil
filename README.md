@@ -264,7 +264,7 @@ When nothing on the device overlaps:
 - Each clipped launch blocks the step for its own duration.
 - The ceiling of a kernel name is the sum of its clipped launches, not the longest one.
 - A synchronization call blocks the step only where it covers idle time. Time already covered by a kernel, copy, or memset stays on that operation. Another synchronization that overlaps the same idle does not shorten that piece. The longest blocker is the longest piece, not the sum of the pieces.
-- Idle time with no synchronization call is a gap named `gpu idle`.
+- Idle time with no synchronization call and no host API call is a gap named `gpu idle`. A `CUPTI_ACTIVITY_KIND_RUNTIME` call blocks only the idle it covers, under its own name. It is not device work, so it does not change `gpu_busy_ns` and it does not overlap a kernel. A call from another process is not this step's blocker.
 
 `allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
 
@@ -282,6 +282,7 @@ Times are nanoseconds. `source` is null. These sqlite tables do not carry a file
 | `CUPTI_ACTIVITY_KIND_MEMCPY` | no | copies |
 | `CUPTI_ACTIVITY_KIND_MEMSET` | no | memsets |
 | `CUPTI_ACTIVITY_KIND_SYNCHRONIZATION` | no | host synchronization calls |
+| `CUPTI_ACTIVITY_KIND_RUNTIME` | no | host API calls on idle; a missing table means none |
 
 Kernel names come from `shortName`, then `demangledName`, then `mangledName`. `symbol` is `mangledName`, then `demangledName`, or null when the export has neither. A short name drops template arguments, so two kernels can share it. The ceiling sums launches with the same name and the same symbol, and `rewrite` needs the longest blocker to be that same symbol. NVTX text is the `text` column when it is non-empty, otherwise `StringIds` at `textId`.
 

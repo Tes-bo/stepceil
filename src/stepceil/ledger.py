@@ -4,7 +4,7 @@ Device time blocks the step only when the clipped device intervals do not
 overlap. The ceiling of the hottest kernel is the sum of its clipped
 launches. Overlap withholds that ceiling. A synchronization call counts
 only on idle time; time already covered by a kernel, copy, or memset stays
-on that operation.
+on that operation. A host API call does the same, and it is not device work.
 """
 
 from dataclasses import replace
@@ -23,7 +23,8 @@ KIND_RANK = {
     "memcpy": 1,
     "memset": 2,
     "sync": 3,
-    "gap": 4,
+    "runtime": 4,
+    "gap": 5,
 }
 
 
@@ -55,14 +56,20 @@ def account(window):
         return _refused(window, busy, idle, ASSUMPTION_SAME, overlap_pair)
 
     holes = complement(busy_spans, window.start_ns, window.end_ns)
+    runtime = _runtime_for_step(window.runtime_ops, clipped, window.syncs)
+    covers = (*window.syncs, *runtime)
     candidates = [_op_candidate(op) for op in clipped]
     candidates.extend(
         _candidate("sync", sync.name, start, end)
         for start, end, sync in _sync_pieces(holes, window.syncs)
     )
     candidates.extend(
+        _candidate("runtime", call.name, start, end)
+        for start, end, call in _sync_pieces(holes, runtime)
+    )
+    candidates.extend(
         _candidate("gap", GPU_IDLE_NAME, start, end)
-        for start, end in _gap_pieces(holes, window.syncs)
+        for start, end in _gap_pieces(holes, covers)
     )
     longest = _longest(candidates)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
@@ -206,35 +213,64 @@ def _stream_key(op):
 
 
 def _sync_pieces(holes, syncs):
-    """Idle covered by each synchronization, one contiguous piece at a time.
+    """Idle covered by each call, one contiguous piece at a time.
 
     A shorter call that overlaps a longer one does not take that idle away.
     The ledger reports the longest piece, so both calls keep their own
     coverage. A kernel, copy, or memset between two pieces still splits
     them: those pieces are not one blocker.
     """
+    ordered = sorted(syncs, key=lambda call: (call.start_ns, call.end_ns))
     pieces = []
-    for sync in syncs:
-        spans = []
-        for hole_start, hole_end in holes:
-            start = max(sync.start_ns, hole_start)
-            end = min(sync.end_ns, hole_end)
+    index = 0
+    count = len(ordered)
+    for hole_start, hole_end in holes:
+        while index < count and ordered[index].end_ns <= hole_start:
+            index += 1
+        cursor = index
+        while cursor < count and ordered[cursor].start_ns < hole_end:
+            call = ordered[cursor]
+            start = max(call.start_ns, hole_start)
+            end = min(call.end_ns, hole_end)
             if end > start:
-                spans.append((start, end))
-        for start, end in merge(spans):
-            pieces.append((start, end, sync))
+                pieces.append((start, end, call))
+            cursor += 1
     return pieces
 
 
-def _gap_pieces(holes, syncs):
+def _runtime_for_step(runtime_ops, device_ops, syncs):
+    """Host calls from this step's process.
+
+    A call from another process is not this step's blocker. When the step
+    names no process, every call stays: there is nothing to reject it with.
+    """
+    known = {op.process_id for op in device_ops if op.process_id is not None}
+    known.update(sync.process_id for sync in syncs if sync.process_id is not None)
+    if not known:
+        return runtime_ops
+    return tuple(
+        call for call in runtime_ops
+        if call.process_id is None or call.process_id in known
+    )
+
+
+def _gap_pieces(holes, covers):
+    ordered = sorted(covers, key=lambda call: (call.start_ns, call.end_ns))
     gaps = []
+    index = 0
+    count = len(ordered)
     for hole_start, hole_end in holes:
+        while index < count and ordered[index].end_ns <= hole_start:
+            index += 1
         covered = []
-        for sync in syncs:
-            start = max(sync.start_ns, hole_start)
-            end = min(sync.end_ns, hole_end)
+        cursor = index
+        while cursor < count and ordered[cursor].start_ns < hole_end:
+            call = ordered[cursor]
+            start = max(call.start_ns, hole_start)
+            end = min(call.end_ns, hole_end)
             if end > start:
                 covered.append((start, end))
+            cursor += 1
         gaps.extend(complement(merge(covered), hole_start, hole_end))
     return merge(gaps)
 

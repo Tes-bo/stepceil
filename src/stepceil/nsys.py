@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from stepceil.errors import StepceilError
-from stepceil.model import DeviceOp, StepWindow, SyncOp
+from stepceil.model import DeviceOp, RuntimeOp, StepWindow, SyncOp
 
 NVTX_PUSH_POP = 59
 NVTX_START_END = 60
@@ -132,12 +132,14 @@ def _load(connection, range_name):
     device_ops.extend(_memcpys(connection, start_ns, end_ns, copy_labels))
     device_ops.extend(_memsets(connection, start_ns, end_ns))
     syncs = _syncs(connection, strings, start_ns, end_ns, sync_labels)
+    runtime = _runtime_ops(connection, strings, start_ns, end_ns)
     return StepWindow(
         name=range_name,
         start_ns=start_ns,
         end_ns=end_ns,
         device_ops=tuple(device_ops),
         syncs=tuple(syncs),
+        runtime_ops=tuple(runtime),
     )
 
 
@@ -362,6 +364,44 @@ def _peer_device_ids(row, device_id):
         if other != device_id and other not in found:
             found.append(other)
     return tuple(found)
+
+
+def _runtime_ops(connection, strings, start_ns, end_ns):
+    """Host API calls that meet the step.
+
+    These are not device work. They can name the idle they cover, which is
+    how a cudaMallocHost in the middle of a step stops being an unnamed gap.
+    """
+    table = "CUPTI_ACTIVITY_KIND_RUNTIME"
+    if not _has_table(connection, table):
+        return []
+    columns = _columns(connection, table)
+    if any(name not in columns for name in ("start", "end", "nameId")):
+        return []
+    has_tid = "globalTid" in columns
+    selected = ["start", "end", "nameId"]
+    if has_tid:
+        selected.append("globalTid")
+    query = (
+        f"SELECT {', '.join(selected)} FROM {table} "
+        "WHERE end > ? AND start < ?"
+    )
+    ops = []
+    for row in connection.execute(query, (start_ns, end_ns)):
+        if row["start"] is None or row["end"] is None:
+            continue
+        start = int(row["start"])
+        end = int(row["end"])
+        if end <= start:
+            continue
+        name = _lookup_string(row["nameId"], strings)
+        if not name or name == "unresolved" or name.startswith("unresolved:"):
+            continue
+        process_id = None
+        if has_tid and row["globalTid"] is not None:
+            process_id = int(row["globalTid"]) & PROCESS_TID_MASK
+        ops.append(RuntimeOp(name, start, end, process_id))
+    return ops
 
 
 def _runtime_index(connection, strings):

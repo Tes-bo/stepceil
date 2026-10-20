@@ -12,12 +12,12 @@ from stepceil.ledger import (
     account,
     overlap_class,
 )
-from stepceil.model import DeviceOp, StepWindow, SyncOp
+from stepceil.model import DeviceOp, RuntimeOp, StepWindow, SyncOp
 from _path import ROOT
 
 
-def window(start, end, ops=(), syncs=(), name="step"):
-    return StepWindow(name, start, end, tuple(ops), tuple(syncs))
+def window(start, end, ops=(), syncs=(), name="step", runtime=()):
+    return StepWindow(name, start, end, tuple(ops), tuple(syncs), tuple(runtime))
 
 
 def kernel(
@@ -215,6 +215,39 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(dropped["longest_blocker"]["kind"], "memcpy")
         self.assertEqual(dropped["longest_blocker"]["blocking_ns"], 40)
         self.assertIsNone(dropped["longest_blocker"]["bytes"])
+
+    def test_host_call_names_the_idle_it_covers(self):
+        ledger = account(window(0, 100, runtime=[
+            RuntimeOp("cudaMallocHost_v3020", 10, 60),
+        ]))
+        self.assertEqual(ledger["longest_blocker"]["kind"], "runtime")
+        self.assertEqual(ledger["longest_blocker"]["name"], "cudaMallocHost_v3020")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 50)
+        self.assertEqual(ledger["gpu_busy_ns"], 0)
+        self.assertEqual(ledger["decision"], "change cudaMallocHost_v3020 first")
+
+        under_kernel = account(window(
+            0, 100,
+            [kernel("pressure", 0, 80)],
+            runtime=[RuntimeOp("cudaMallocHost_v3020", 0, 100)],
+        ))
+        self.assertEqual(under_kernel["longest_blocker"]["kind"], "kernel")
+        self.assertEqual(under_kernel["longest_blocker"]["blocking_ns"], 80)
+        self.assertEqual(under_kernel["gpu_busy_ns"], 80)
+
+        foreign = account(window(
+            0, 100,
+            [kernel("pressure", 0, 10, process_id=10)],
+            runtime=[RuntimeOp("cudaMallocHost_v3020", 10, 90, process_id=11)],
+        ))
+        self.assertEqual(foreign["longest_blocker"]["kind"], "gap")
+        own = account(window(
+            0, 100,
+            [kernel("pressure", 0, 10, process_id=10)],
+            runtime=[RuntimeOp("cudaMallocHost_v3020", 10, 90, process_id=10)],
+        ))
+        self.assertEqual(own["longest_blocker"]["kind"], "runtime")
+        self.assertEqual(own["longest_blocker"]["blocking_ns"], 80)
 
     def test_empty_step_is_one_gap(self):
         ledger = account(window(0, 100))

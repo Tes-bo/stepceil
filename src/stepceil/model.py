@@ -30,6 +30,16 @@ class SyncOp:
 
 
 @dataclass(frozen=True)
+class RuntimeOp:
+    """One host CUDA API call. It is not device work."""
+
+    name: str
+    start_ns: int
+    end_ns: int
+    process_id: int | None = None
+
+
+@dataclass(frozen=True)
 class StepWindow:
     """The single NVTX range and the CUDA records that meet it."""
 
@@ -38,3 +48,4 @@ class StepWindow:
     end_ns: int
     device_ops: tuple[DeviceOp, ...]
     syncs: tuple[SyncOp, ...]
+    runtime_ops: tuple[RuntimeOp, ...] = ()
