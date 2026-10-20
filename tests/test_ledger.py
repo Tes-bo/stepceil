@@ -312,6 +312,33 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["longest_blocker"]["name"], "context synchronize")
         self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 80)
 
+    def test_spanning_call_keeps_the_largest_hole(self):
+        kernels = [
+            kernel("pressure", 0, 10),
+            kernel("pressure", 20, 30),
+            kernel("pressure", 40, 50),
+        ]
+        ledger = account(window(
+            0, 100,
+            kernels,
+            [SyncOp("context synchronize", 0, 100)],
+            runtime=[RuntimeOp("cudaMallocHost_v3020", 10, 20)],
+        ))
+        self.assertEqual(ledger["longest_blocker"]["kind"], "sync")
+        self.assertEqual(ledger["longest_blocker"]["start_ns"], 50)
+        self.assertEqual(ledger["longest_blocker"]["end_ns"], 100)
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 50)
+        self.assertEqual(ledger["gpu_busy_ns"], 30)
+
+        uncovered = account(window(
+            0, 100,
+            kernels,
+            runtime=[RuntimeOp("cudaMallocHost_v3020", 10, 20)],
+        ))
+        self.assertEqual(uncovered["longest_blocker"]["kind"], "gap")
+        self.assertEqual(uncovered["longest_blocker"]["start_ns"], 50)
+        self.assertEqual(uncovered["longest_blocker"]["blocking_ns"], 50)
+
     def test_shorter_sync_does_not_shorten_a_longer_one(self):
         forward = [
             SyncOp("a", 0, 30),

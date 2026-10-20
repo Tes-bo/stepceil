@@ -225,17 +225,20 @@ def _sync_pieces(holes, syncs):
     The ledger reports the longest piece, so both calls keep their own
     coverage. A kernel, copy, or memset between two pieces still splits
     them: those pieces are not one blocker.
+
+    Holes are walked from each call. A call that spans the step must not
+    pin a scan that restarts at that call for every later hole.
     """
     ordered = sorted(syncs, key=lambda call: (call.start_ns, call.end_ns))
     pieces = []
     index = 0
-    count = len(ordered)
-    for hole_start, hole_end in holes:
-        while index < count and ordered[index].end_ns <= hole_start:
+    count = len(holes)
+    for call in ordered:
+        while index < count and holes[index][1] <= call.start_ns:
             index += 1
         cursor = index
-        while cursor < count and ordered[cursor].start_ns < hole_end:
-            call = ordered[cursor]
+        while cursor < count and holes[cursor][0] < call.end_ns:
+            hole_start, hole_end = holes[cursor]
             start = max(call.start_ns, hole_start)
             end = min(call.end_ns, hole_end)
             if end > start:
@@ -261,23 +264,32 @@ def _runtime_for_step(runtime_ops, device_ops, syncs):
 
 
 def _gap_pieces(holes, covers):
-    ordered = sorted(covers, key=lambda call: (call.start_ns, call.end_ns))
+    """Idle that no synchronization, host call, or other range covers.
+
+    Coverage is clipped to the holes first, then subtracted. One spanning
+    call must not make every hole rescan the whole list.
+    """
+    covered = merge(
+        (start, end) for start, end, _call in _sync_pieces(holes, covers)
+    )
     gaps = []
     index = 0
-    count = len(ordered)
+    count = len(covered)
     for hole_start, hole_end in holes:
-        while index < count and ordered[index].end_ns <= hole_start:
+        while index < count and covered[index][1] <= hole_start:
             index += 1
-        covered = []
-        cursor = index
-        while cursor < count and ordered[cursor].start_ns < hole_end:
-            call = ordered[cursor]
-            start = max(call.start_ns, hole_start)
-            end = min(call.end_ns, hole_end)
-            if end > start:
-                covered.append((start, end))
-            cursor += 1
-        gaps.extend(complement(merge(covered), hole_start, hole_end))
+        cursor = hole_start
+        scan = index
+        while scan < count and covered[scan][0] < hole_end:
+            start, end = covered[scan]
+            if start > cursor:
+                gaps.append((cursor, min(start, hole_end)))
+            cursor = max(cursor, end)
+            scan += 1
+            if cursor >= hole_end:
+                break
+        if cursor < hole_end:
+            gaps.append((cursor, hole_end))
     return merge(gaps)
 
 
