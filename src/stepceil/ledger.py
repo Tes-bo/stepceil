@@ -24,7 +24,8 @@ KIND_RANK = {
     "memset": 2,
     "sync": 3,
     "runtime": 4,
-    "gap": 5,
+    "nvtx": 5,
+    "gap": 6,
 }
 
 
@@ -57,7 +58,8 @@ def account(window):
 
     holes = complement(busy_spans, window.start_ns, window.end_ns)
     runtime = _runtime_for_step(window.runtime_ops, clipped, window.syncs)
-    covers = (*window.syncs, *runtime)
+    nvtx = _runtime_for_step(window.nvtx_ops, clipped, window.syncs)
+    covers = (*window.syncs, *runtime, *nvtx)
     candidates = [_op_candidate(op) for op in clipped]
     candidates.extend(
         _candidate("sync", sync.name, start, end)
@@ -66,6 +68,10 @@ def account(window):
     candidates.extend(
         _candidate("runtime", call.name, start, end)
         for start, end, call in _sync_pieces(holes, runtime)
+    )
+    candidates.extend(
+        _candidate("nvtx", span.name, start, end)
+        for start, end, span in _sync_pieces(holes, nvtx)
     )
     candidates.extend(
         _candidate("gap", GPU_IDLE_NAME, start, end)

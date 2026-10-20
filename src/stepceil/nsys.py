@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from stepceil.errors import StepceilError
-from stepceil.model import DeviceOp, RuntimeOp, StepWindow, SyncOp
+from stepceil.model import DeviceOp, NvtxOp, RuntimeOp, StepWindow, SyncOp
 
 NVTX_PUSH_POP = 59
 NVTX_START_END = 60
@@ -66,7 +66,7 @@ def list_ranges(path):
     try:
         counts = {}
         durations = {}
-        for name, start, end in _nvtx_events(connection):
+        for name, start, end, _process in _nvtx_events(connection):
             counts[name] = counts.get(name, 0) + 1
             durations.setdefault(name, [])
             if _closed(start, end):
@@ -105,9 +105,10 @@ def _open(path):
 
 
 def _load(connection, range_name):
+    events = _nvtx_events(connection)
     matches = [
         (start, end)
-        for name, start, end in _nvtx_events(connection)
+        for name, start, end, _process in events
         if name == range_name
     ]
     if len(matches) != 1:
@@ -133,6 +134,7 @@ def _load(connection, range_name):
     device_ops.extend(_memsets(connection, start_ns, end_ns))
     syncs = _syncs(connection, strings, start_ns, end_ns, sync_labels)
     runtime = _runtime_ops(connection, strings, start_ns, end_ns)
+    nvtx = _nvtx_ops(events, range_name, start_ns, end_ns)
     return StepWindow(
         name=range_name,
         start_ns=start_ns,
@@ -140,6 +142,7 @@ def _load(connection, range_name):
         device_ops=tuple(device_ops),
         syncs=tuple(syncs),
         runtime_ops=tuple(runtime),
+        nvtx_ops=tuple(nvtx),
     )
 
 
@@ -152,23 +155,50 @@ def _nvtx_events(connection):
     if not has_text and not has_text_id:
         raise StepceilError("NVTX_EVENTS has no text or textId column")
     strings = _string_ids(connection)
+    has_tid = "globalTid" in columns
     selected = ["start", "end", "eventType"]
     if has_text:
         selected.append("text")
     if has_text_id:
         selected.append("textId")
+    if has_tid:
+        selected.append("globalTid")
     query = (
         f"SELECT {', '.join(selected)} FROM NVTX_EVENTS "
         "WHERE eventType IN (?, ?)"
     )
     events = []
     for row in connection.execute(query, (NVTX_PUSH_POP, NVTX_START_END)):
+        process_id = None
+        if has_tid and row["globalTid"] is not None:
+            process_id = int(row["globalTid"]) & PROCESS_TID_MASK
         events.append((
             _range_text(row, has_text, has_text_id, strings),
             row["start"],
             row["end"],
+            process_id,
         ))
     return events
+
+
+def _nvtx_ops(events, range_name, start_ns, end_ns):
+    """Ranges inside the step, other than the step itself.
+
+    The step range covers every idle piece, so naming it would hide the
+    code that actually ran. An empty name is not a blocker.
+    """
+    ops = []
+    for name, start, end, process_id in events:
+        if not name or not _closed(start, end):
+            continue
+        start = int(start)
+        end = int(end)
+        if end <= start_ns or start >= end_ns:
+            continue
+        if name == range_name and start == start_ns and end == end_ns:
+            continue
+        ops.append(NvtxOp(name, start, end, process_id))
+    return ops
 
 
 def _closed(start, end):

@@ -40,6 +40,16 @@ class RuntimeOp:
 
 
 @dataclass(frozen=True)
+class NvtxOp:
+    """One NVTX range other than the step itself. It is not device work."""
+
+    name: str
+    start_ns: int
+    end_ns: int
+    process_id: int | None = None
+
+
+@dataclass(frozen=True)
 class StepWindow:
     """The single NVTX range and the CUDA records that meet it."""
 
@@ -49,3 +59,4 @@ class StepWindow:
     device_ops: tuple[DeviceOp, ...]
     syncs: tuple[SyncOp, ...]
     runtime_ops: tuple[RuntimeOp, ...] = ()
+    nvtx_ops: tuple[NvtxOp, ...] = ()

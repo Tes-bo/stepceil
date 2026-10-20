@@ -264,7 +264,7 @@ When nothing on the device overlaps:
 - Each clipped launch blocks the step for its own duration.
 - The ceiling of a kernel name is the sum of its clipped launches, not the longest one.
 - A synchronization call blocks the step only where it covers idle time. Time already covered by a kernel, copy, or memset stays on that operation. Another synchronization that overlaps the same idle does not shorten that piece. The longest blocker is the longest piece, not the sum of the pieces.
-- Idle time with no synchronization call and no host API call is a gap named `gpu idle`. A `CUPTI_ACTIVITY_KIND_RUNTIME` call blocks only the idle it covers, under its own name. It is not device work, so it does not change `gpu_busy_ns` and it does not overlap a kernel. A call from another process is not this step's blocker.
+- Idle time with no synchronization call, no host API call, and no other NVTX range is a gap named `gpu idle`. A `CUPTI_ACTIVITY_KIND_RUNTIME` call and any NVTX range other than the step itself block only the idle they cover, under their own names. Neither is device work, so neither changes `gpu_busy_ns` or overlaps a kernel. The step range is not a blocker: it covers the whole window. A call or range from another process is not this step's blocker.
 
 `allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
 

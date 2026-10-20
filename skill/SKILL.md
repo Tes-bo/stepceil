@@ -38,7 +38,8 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 - `source` is null in this version. Do not invent a file and line.
 - When the blocker is a copy or memset, `longest_blocker.bytes` is its size from the export only if that transfer lies entirely inside the step. Null means the export did not say, or the transfer crosses the boundary. Do not invent a size.
 - A synchronization's blocking time is the idle that call covers. Another synchronization on the same idle does not shorten it. A kernel, copy, or memset still splits it. Do not add the pieces.
-- When the blocker kind is `runtime`, that host API call is what to change. It is not GPU work. `gpu idle` means no synchronization and no host API call covers that piece.
+- When the blocker kind is `runtime`, that host API call is what to change. It is not GPU work.
+- When the blocker kind is `nvtx`, that range is the code to change. It is not GPU work. The step's own range is not a blocker. `gpu idle` means no synchronization, no host API call, and no other NVTX range covers that piece.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
 
 ```

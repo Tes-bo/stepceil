@@ -32,6 +32,23 @@ class ReadTest(unittest.TestCase):
             ))
             self.assertEqual(account(loaded), direct)
 
+    def test_step_range_is_not_a_blocker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(
+                path,
+                [
+                    {"text": "step", "start": 0, "end": 100},
+                    {"text": "phase", "start": 10, "end": 90},
+                ],
+            )
+            loaded = load_path(path, "step")
+            self.assertEqual([op.name for op in loaded.nvtx_ops], ["phase"])
+            ledger = account(loaded)
+            self.assertEqual(ledger["longest_blocker"]["kind"], "nvtx")
+            self.assertEqual(ledger["longest_blocker"]["name"], "phase")
+            self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 80)
+
     def test_memcpy_memset_and_other_range_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.sqlite"

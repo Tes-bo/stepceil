@@ -12,12 +12,14 @@ from stepceil.ledger import (
     account,
     overlap_class,
 )
-from stepceil.model import DeviceOp, RuntimeOp, StepWindow, SyncOp
+from stepceil.model import DeviceOp, NvtxOp, RuntimeOp, StepWindow, SyncOp
 from _path import ROOT
 
 
-def window(start, end, ops=(), syncs=(), name="step", runtime=()):
-    return StepWindow(name, start, end, tuple(ops), tuple(syncs), tuple(runtime))
+def window(start, end, ops=(), syncs=(), name="step", runtime=(), nvtx=()):
+    return StepWindow(
+        name, start, end, tuple(ops), tuple(syncs), tuple(runtime), tuple(nvtx),
+    )
 
 
 def kernel(
@@ -215,6 +217,29 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(dropped["longest_blocker"]["kind"], "memcpy")
         self.assertEqual(dropped["longest_blocker"]["blocking_ns"], 40)
         self.assertIsNone(dropped["longest_blocker"]["bytes"])
+
+    def test_inner_range_names_the_idle_it_covers(self):
+        ledger = account(window(0, 100, nvtx=[NvtxOp("phase", 10, 90)]))
+        self.assertEqual(ledger["longest_blocker"]["kind"], "nvtx")
+        self.assertEqual(ledger["longest_blocker"]["name"], "phase")
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 80)
+        self.assertEqual(ledger["gpu_busy_ns"], 0)
+        self.assertEqual(ledger["decision"], "change phase first")
+
+        under_kernel = account(window(
+            0, 100,
+            [kernel("pressure", 0, 70)],
+            nvtx=[NvtxOp("phase", 0, 100)],
+        ))
+        self.assertEqual(under_kernel["longest_blocker"]["kind"], "kernel")
+        self.assertEqual(under_kernel["gpu_busy_ns"], 70)
+
+        foreign = account(window(
+            0, 100,
+            [kernel("pressure", 0, 10, process_id=10)],
+            nvtx=[NvtxOp("phase", 10, 90, process_id=11)],
+        ))
+        self.assertEqual(foreign["longest_blocker"]["kind"], "gap")
 
     def test_host_call_names_the_idle_it_covers(self):
         ledger = account(window(0, 100, runtime=[
