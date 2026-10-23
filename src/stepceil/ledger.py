@@ -35,10 +35,12 @@ def account(window):
             f"NVTX range {window.name!r} ends at or before it starts"
         )
     clipped = []
+    clipped_sources = []
     for op in window.device_ops:
         piece = _clip_op(op, window.start_ns, window.end_ns)
         if piece is not None:
             clipped.append(piece)
+            clipped_sources.append(op)
     _require_identity(
         clipped, window.name, window.syncs, window.start_ns, window.end_ns,
     )
@@ -60,17 +62,29 @@ def account(window):
     runtime = _runtime_for_step(window.runtime_ops, clipped, window.syncs)
     nvtx = _runtime_for_step(window.nvtx_ops, clipped, window.syncs)
     covers = (*window.syncs, *runtime, *nvtx)
-    candidates = [_op_candidate(op) for op in clipped]
+    candidates = [
+        _op_candidate(piece, source)
+        for piece, source in zip(clipped, clipped_sources)
+    ]
     candidates.extend(
-        _candidate("sync", sync.name, start, end)
+        _candidate(
+            "sync", sync.name, start, end,
+            source_start=sync.start_ns, source_end=sync.end_ns,
+        )
         for start, end, sync in _sync_pieces(holes, window.syncs)
     )
     candidates.extend(
-        _candidate("runtime", call.name, start, end)
+        _candidate(
+            "runtime", call.name, start, end,
+            source_start=call.start_ns, source_end=call.end_ns,
+        )
         for start, end, call in _sync_pieces(holes, runtime)
     )
     candidates.extend(
-        _candidate("nvtx", span.name, start, end)
+        _candidate(
+            "nvtx", span.name, start, end,
+            source_start=span.start_ns, source_end=span.end_ns,
+        )
         for start, end, span in _sync_pieces(holes, nvtx)
     )
     candidates.extend(
@@ -293,13 +307,17 @@ def _gap_pieces(holes, covers):
     return merge(gaps)
 
 
-def _op_candidate(op):
+def _op_candidate(piece, source):
     return _candidate(
-        op.kind, op.name, op.start_ns, op.end_ns, op.byte_count, op.symbol
+        piece.kind, piece.name, piece.start_ns, piece.end_ns,
+        piece.byte_count, piece.symbol, source.start_ns, source.end_ns,
     )
 
 
-def _candidate(kind, name, start, end, byte_count=None, symbol=None):
+def _candidate(
+    kind, name, start, end, byte_count=None, symbol=None,
+    source_start=None, source_end=None,
+):
     return {
         "kind": kind,
         "name": name,
@@ -309,6 +327,8 @@ def _candidate(kind, name, start, end, byte_count=None, symbol=None):
         "blocking_ns": end - start,
         "source": None,
         "bytes": byte_count,
+        "source_start_ns": start if source_start is None else source_start,
+        "source_end_ns": end if source_end is None else source_end,
     }
 
 
@@ -318,16 +338,31 @@ def _kernel_key(name, symbol):
 
 
 def _longest(candidates):
+    """The longest clipped piece.
+
+    A wider call that only wraps that piece is not a longer blocker.
+    The narrowest call that covers it is the one named. Name breaks a
+    remaining tie, after the earlier start and the kind.
+    """
     if not candidates:
         return None
-    return min(
-        candidates,
-        key=lambda item: (
-            -item["blocking_ns"],
-            item["start_ns"],
-            KIND_RANK[item["kind"]],
-            item["name"],
-        ),
+    chosen = min(candidates, key=_blocker_key)
+    return {
+        field: chosen[field]
+        for field in (
+            "kind", "name", "symbol", "start_ns", "end_ns",
+            "blocking_ns", "source", "bytes",
+        )
+    }
+
+
+def _blocker_key(item):
+    return (
+        -item["blocking_ns"],
+        item["start_ns"],
+        KIND_RANK[item["kind"]],
+        item["source_end_ns"] - item["source_start_ns"],
+        item["name"],
     )
 
 

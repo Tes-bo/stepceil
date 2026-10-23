@@ -32,7 +32,8 @@ TOOL = {
         "their durations or their byte counts. bytes is null unless that "
         "side is a copy or memset that lies entirely inside the step. "
         "A runtime blocker is a host API call, and an nvtx blocker is another "
-        "range inside the step. Neither is GPU work. "
+        "range inside the step. Neither is GPU work. When several calls cover "
+        "the same idle, the narrowest one is the blocker. "
         "More than one process in the step is an error."
     ),
     "inputSchema": {

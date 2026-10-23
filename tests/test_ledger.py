@@ -391,6 +391,34 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["hottest_kernel"]["name"], "beta")
         self.assertEqual(ledger["ceiling_ns"], 40)
 
+    def test_narrower_range_names_the_same_idle(self):
+        ledger = account(window(0, 100, nvtx=[
+            NvtxOp("phase", -20, 120),
+            NvtxOp("z", -1, 101),
+        ]))
+        self.assertEqual(ledger["longest_blocker"]["kind"], "nvtx")
+        self.assertEqual(ledger["longest_blocker"]["name"], "z")
+        self.assertEqual(ledger["longest_blocker"]["start_ns"], 0)
+        self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 100)
+        self.assertNotIn("source_start_ns", ledger["longest_blocker"])
+
+        same_span = account(window(0, 100, nvtx=[
+            NvtxOp("beta", -5, 105),
+            NvtxOp("alpha", -5, 105),
+        ]))
+        self.assertEqual(same_span["longest_blocker"]["name"], "alpha")
+
+        wider = account(window(
+            0, 100,
+            [kernel("pressure", 0, 10)],
+            nvtx=[
+                NvtxOp("tight", 10, 40),
+                NvtxOp("wide", 0, 100),
+            ],
+        ))
+        self.assertEqual(wider["longest_blocker"]["name"], "wide")
+        self.assertEqual(wider["longest_blocker"]["blocking_ns"], 90)
+
     def test_longest_tie_uses_the_earlier_interval(self):
         ledger = account(window(0, 100, [
             kernel("pressure", 50, 100),
