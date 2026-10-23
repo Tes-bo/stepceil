@@ -83,6 +83,7 @@ def _repeated_lines(repeated):
     lines = [f"repeated: {len(repeated)}"]
     for index, item in enumerate(repeated):
         prefix = f"repeated.{index}"
+        lines.append(f"{prefix}.kind: {item['kind']}")
         lines.append(f"{prefix}.name: {item['name']}")
         lines.append(f"{prefix}.idle_ns: {item['idle_ns']}")
         lines.append(f"{prefix}.calls: {item['calls']}")

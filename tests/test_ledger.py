@@ -500,6 +500,7 @@ class LedgerTest(unittest.TestCase):
         ))
         self.assertEqual(ledger["decision"], "change phase first")
         self.assertEqual(ledger["repeated"], [{
+            "kind": "runtime",
             "name": "cudaLaunchKernel_v7000",
             "idle_ns": 40,
             "calls": 4,
@@ -511,6 +512,60 @@ class LedgerTest(unittest.TestCase):
             runtime=[RuntimeOp("cudaLaunchKernel_v7000", 0, 100)],
         ))
         self.assertEqual(split["repeated"], [])
+
+    def test_repeated_range_is_several_short_calls(self):
+        ledger = account(window(
+            0, 100,
+            [
+                kernel("gap", 58, 59),
+                kernel("gap", 67, 68),
+                kernel("tail", 76, 100),
+            ],
+            nvtx=[
+                NvtxOp("phase", 0, 50),
+                NvtxOp("phase", 0, 100),
+                NvtxOp("cycle", 50, 58),
+                NvtxOp("cycle", 59, 67),
+                NvtxOp("cycle", 68, 76),
+                NvtxOp("alias", 50, 59),
+                NvtxOp("alias", 59, 68),
+                NvtxOp("alias", 68, 77),
+                NvtxOp("inner", 50, 57),
+                NvtxOp("inner", 59, 66),
+                NvtxOp("inner", 68, 75),
+            ],
+            runtime=[
+                RuntimeOp("cudaLaunchKernel_v7000", 50, 54),
+                RuntimeOp("cudaLaunchKernel_v7000", 59, 63),
+                RuntimeOp("cudaLaunchKernel_v7000", 68, 73),
+                RuntimeOp("cudaMallocHost_v3020", 50, 52),
+            ],
+        ))
+        self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["repeated"], [
+            {
+                "kind": "nvtx",
+                "name": "cycle",
+                "idle_ns": 24,
+                "calls": 3,
+            },
+            {
+                "kind": "runtime",
+                "name": "cudaLaunchKernel_v7000",
+                "idle_ns": 13,
+                "calls": 3,
+            },
+        ])
+        text = render_text(ledger)
+        self.assertIn("repeated.0.kind: nvtx\n", text)
+        self.assertIn("repeated.1.kind: runtime\n", text)
+
+        one = account(window(
+            0, 100,
+            [kernel("fill", 40, 60)],
+            nvtx=[NvtxOp("cycle", 0, 100)],
+        ))
+        self.assertEqual(one["repeated"], [])
 
     def test_narrower_range_names_the_same_idle(self):
         ledger = account(window(0, 100, nvtx=[

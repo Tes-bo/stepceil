@@ -95,7 +95,11 @@ def account(window):
     contained = _contained(longest, candidates, nest=True)
     separate = _separate(longest, candidates)
     further = _further(longest, separate, candidates, step_time)
-    repeated = _repeated(_sync_pieces(holes, runtime), step_time)
+    repeated = _repeated(
+        _sync_pieces(holes, runtime),
+        _sync_pieces(holes, nvtx),
+        step_time,
+    )
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
@@ -543,28 +547,89 @@ def _further(winner, separate, candidates, step_time):
     return found
 
 
-def _repeated(pieces, step_time):
-    """One host API whose idle pieces together last a tenth of the step.
+def _repeated(runtime_pieces, nvtx_pieces, step_time):
+    """Host APIs, and ranges that never form one long idle piece.
 
-    One call, even when a kernel splits it, is not repeated. The union is
-    not a blocker's time: the pieces stay separate, and the decision does
-    not change.
+    One call, even when a kernel splits it, is not repeated. A range that
+    already has an idle piece as long as a tenth of the step is not listed
+    again: that piece is already named. A range whose idle lies inside
+    another listed range is the same time, so it is left off. When two
+    ranges cover the same idle, the narrower source span remains. The union
+    is not a blocker's time, and two entries are not one total.
     """
+    found = _repeated_kind(runtime_pieces, "runtime", step_time, short=False)
+    found.extend(_repeated_kind(nvtx_pieces, "nvtx", step_time, short=True))
+    found.sort(key=lambda item: (-item["idle_ns"], item["name"], item["kind"]))
+    return found
+
+
+def _repeated_kind(pieces, kind, step_time, short):
     grouped = {}
     for start, end, call in pieces:
-        spans, calls = grouped.setdefault(call.name, ([], set()))
+        spans, calls = grouped.setdefault(call.name, ([], {}))
         spans.append((start, end))
-        calls.add(id(call))
-    found = []
+        calls[id(call)] = call
+    qualifying = []
     for name, (spans, calls) in grouped.items():
         if len(calls) < 2:
             continue
-        idle = length(merge(spans))
+        merged = merge(spans)
+        idle = length(merged)
         if not _allows_rewrite(idle, step_time):
             continue
-        found.append({"name": name, "idle_ns": idle, "calls": len(calls)})
-    found.sort(key=lambda item: (-item["idle_ns"], item["name"]))
-    return found
+        longest_piece = max(end - start for start, end in spans)
+        if short and _allows_rewrite(longest_piece, step_time):
+            continue
+        qualifying.append({
+            "kind": kind,
+            "name": name,
+            "idle_ns": idle,
+            "calls": len(calls),
+            "spans": merged,
+            "source_span": sum(
+                call.end_ns - call.start_ns for call in calls.values()
+            ),
+        })
+    if short:
+        qualifying = [
+            item for item in qualifying
+            if not any(
+                _range_hides(item, other)
+                for other in qualifying
+                if other is not item
+            )
+        ]
+    return [
+        {key: item[key] for key in ("kind", "name", "idle_ns", "calls")}
+        for item in qualifying
+    ]
+
+
+def _range_hides(item, other):
+    """True when other's idle already accounts for item."""
+    if _intersection_length(item["spans"], other["spans"]) != item["idle_ns"]:
+        return False
+    if item["idle_ns"] != other["idle_ns"]:
+        return item["idle_ns"] < other["idle_ns"]
+    if item["source_span"] != other["source_span"]:
+        return item["source_span"] > other["source_span"]
+    return item["name"] > other["name"]
+
+
+def _intersection_length(left, right):
+    total = 0
+    i = 0
+    j = 0
+    while i < len(left) and j < len(right):
+        start = max(left[i][0], right[j][0])
+        end = min(left[i][1], right[j][1])
+        if end > start:
+            total += end - start
+        if left[i][1] < right[j][1]:
+            i += 1
+        else:
+            j += 1
+    return total
 
 
 def _ledger(
