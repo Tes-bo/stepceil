@@ -40,7 +40,7 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 - A synchronization's blocking time is the idle that call covers. Another synchronization on the same idle does not shorten it. A kernel, copy, or memset still splits it. Do not add the pieces. When several calls cover that same piece, the narrowest call is the blocker. Do not change a wider range that only wraps it.
 - When the blocker kind is `runtime`, that host API call is what to change. It is not GPU work.
 - When the blocker kind is `nvtx`, that range is the code to change. It is not GPU work. The step's own range is not a blocker. `gpu idle` means no synchronization, no host API call, and no other NVTX range covers that piece.
-- `contained` is the longest operation strictly inside the blocker. It is not a second decision. That is where the blocker's time went. Do not rewrite a kernel from it. Null means nothing shorter sits inside that piece.
+- `contained` is the longest operation strictly inside the blocker. It is not a second decision. That is where the blocker's time went. `contained.contained` is the longest operation strictly inside that one, and the ledger stops there. Do not rewrite a kernel from either of them. Null means nothing shorter sits inside that piece.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
 
 ```

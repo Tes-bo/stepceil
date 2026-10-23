@@ -35,7 +35,8 @@ TOOL = {
         "range inside the step. Neither is GPU work. When several calls cover "
         "the same idle, the narrowest one is the blocker. contained is the "
         "longest operation strictly inside that piece. It is not a second "
-        "decision. "
+        "decision. contained.contained opens that result once more, then "
+        "stops. "
         "More than one process in the step is an error."
     ),
     "inputSchema": {

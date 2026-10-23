@@ -71,6 +71,14 @@ def render_text(ledger):
         ledger["contained"],
         ("kind", "name", "symbol", "blocking_ns"),
     ))
+    nested = None
+    if ledger["contained"] is not None:
+        nested = ledger["contained"]["contained"]
+    lines.extend(_object_lines(
+        "contained.contained",
+        nested,
+        ("kind", "name", "symbol", "blocking_ns"),
+    ))
     lines.extend(_object_lines(
         "hottest_kernel",
         ledger["hottest_kernel"],

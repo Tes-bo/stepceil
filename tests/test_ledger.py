@@ -403,6 +403,9 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["contained"]["name"], "inner")
         self.assertEqual(ledger["contained"]["blocking_ns"], 80)
         self.assertIsNone(ledger["contained"]["symbol"])
+        self.assertEqual(ledger["contained"]["contained"]["name"], "leaf")
+        self.assertEqual(ledger["contained"]["contained"]["blocking_ns"], 20)
+        self.assertNotIn("contained", ledger["contained"]["contained"])
 
         alone = account(window(0, 100, nvtx=[NvtxOp("phase", 0, 100)]))
         self.assertIsNone(alone["contained"])
@@ -413,6 +416,23 @@ class LedgerTest(unittest.TestCase):
         ]))
         self.assertEqual(same["longest_blocker"]["name"], "z")
         self.assertIsNone(same["contained"])
+
+        opened = account(window(
+            0, 100,
+            nvtx=[
+                NvtxOp("phase", 0, 100),
+                NvtxOp("inner", 10, 90),
+            ],
+            runtime=[RuntimeOp("cudaMallocHost_v3020", 20, 70)],
+        ))
+        self.assertEqual(opened["decision"], "change phase first")
+        self.assertEqual(opened["contained"]["name"], "inner")
+        self.assertEqual(opened["contained"]["contained"]["kind"], "runtime")
+        self.assertEqual(
+            opened["contained"]["contained"]["name"], "cudaMallocHost_v3020",
+        )
+        self.assertEqual(opened["contained"]["contained"]["blocking_ns"], 50)
+        self.assertNotIn("contained", opened["contained"]["contained"])
 
     def test_narrower_range_names_the_same_idle(self):
         ledger = account(window(0, 100, nvtx=[

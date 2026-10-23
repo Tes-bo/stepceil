@@ -92,7 +92,7 @@ def account(window):
         for start, end in _gap_pieces(holes, covers)
     )
     longest = _longest(candidates)
-    contained = _contained(longest, candidates)
+    contained = _contained(longest, candidates, nest=True)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
@@ -453,12 +453,13 @@ def _overlap_op(op):
     }
 
 
-def _contained(winner, candidates):
+def _contained(winner, candidates, nest=False):
     """The longest operation strictly inside the winning piece.
 
     It does not replace the blocker. A wider range can be the piece while
     a shorter range inside it is where that time went. An equal span is
-    the same piece, not something inside it.
+    the same piece, not something inside it. One nested step records the
+    longest operation inside that result, and then stops.
     """
     if winner is None:
         return None
@@ -474,12 +475,15 @@ def _contained(winner, candidates):
     if not inside:
         return None
     chosen = min(inside, key=_blocker_key)
-    return {
+    result = {
         "kind": chosen["kind"],
         "name": chosen["name"],
         "symbol": chosen["symbol"],
         "blocking_ns": chosen["blocking_ns"],
     }
+    if nest:
+        result["contained"] = _contained(chosen, candidates)
+    return result
 
 
 def _ledger(
