@@ -36,7 +36,8 @@ TOOL = {
         "the same idle, the narrowest one is the blocker. contained is the "
         "longest operation strictly inside that piece. It is not a second "
         "decision. contained.contained opens that result once more, then "
-        "stops. "
+        "stops. separate is the longest piece that does not meet the blocker. "
+        "It is not a second decision. "
         "More than one process in the step is an error."
     ),
     "inputSchema": {

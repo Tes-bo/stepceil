@@ -93,6 +93,7 @@ def account(window):
     )
     longest = _longest(candidates)
     contained = _contained(longest, candidates, nest=True)
+    separate = _separate(longest, candidates)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
@@ -102,6 +103,7 @@ def account(window):
         ASSUMPTION_EXCLUSIVE,
         longest,
         contained,
+        separate,
         hottest,
         ceiling,
         allow,
@@ -420,7 +422,7 @@ def _decision(longest, hottest, allow, refused):
 
 def _refused(window, busy, idle, reason, pair):
     return _ledger(
-        window, busy, idle, reason, None, None, None, None, False, reason,
+        window, busy, idle, reason, None, None, None, None, None, False, reason,
         _decision(None, None, False, reason),
         _overlap_payload(pair),
     )
@@ -486,9 +488,29 @@ def _contained(winner, candidates, nest=False):
     return result
 
 
+def _separate(winner, candidates):
+    """The longest piece that does not meet the blocker.
+
+    Touching endpoints do not meet. A piece inside the blocker is not
+    separate from it. This does not replace the decision.
+    """
+    if winner is None:
+        return None
+    rest = [
+        item for item in candidates
+        if item["end_ns"] <= winner["start_ns"] or item["start_ns"] >= winner["end_ns"]
+    ]
+    chosen = _longest(rest)
+    if chosen is None:
+        return None
+    chosen = dict(chosen)
+    chosen["contained"] = _contained(chosen, candidates, nest=True)
+    return chosen
+
+
 def _ledger(
-    window, busy, idle, assumption, longest, contained, hottest, ceiling,
-    allow, refused, decision, overlap,
+    window, busy, idle, assumption, longest, contained, separate, hottest,
+    ceiling, allow, refused, decision, overlap,
 ):
     return {
         "range": window.name,
@@ -500,6 +522,7 @@ def _ledger(
         "assumption": assumption,
         "longest_blocker": longest,
         "contained": contained,
+        "separate": separate,
         "hottest_kernel": hottest,
         "ceiling_ns": ceiling,
         "allow_rewrite": allow,

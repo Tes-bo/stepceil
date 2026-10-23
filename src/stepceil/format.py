@@ -51,6 +51,17 @@ def render_diff_text(report):
     return "\n".join(lines) + "\n"
 
 
+def _contained_lines(prefix, obj):
+    lines = _object_lines(prefix, obj, ("kind", "name", "symbol", "blocking_ns"))
+    nested = None if obj is None else obj["contained"]
+    lines.extend(_object_lines(
+        f"{prefix}.contained",
+        nested,
+        ("kind", "name", "symbol", "blocking_ns"),
+    ))
+    return lines
+
+
 def render_text(ledger):
     lines = [
         f"range: {ledger['range']}",
@@ -66,19 +77,16 @@ def render_text(ledger):
         ledger["longest_blocker"],
         ("kind", "name", "symbol", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
+    lines.extend(_contained_lines("contained", ledger["contained"]))
     lines.extend(_object_lines(
-        "contained",
-        ledger["contained"],
-        ("kind", "name", "symbol", "blocking_ns"),
+        "separate",
+        ledger["separate"],
+        ("kind", "name", "symbol", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
-    nested = None
-    if ledger["contained"] is not None:
-        nested = ledger["contained"]["contained"]
-    lines.extend(_object_lines(
-        "contained.contained",
-        nested,
-        ("kind", "name", "symbol", "blocking_ns"),
-    ))
+    separate_contained = None
+    if ledger["separate"] is not None:
+        separate_contained = ledger["separate"]["contained"]
+    lines.extend(_contained_lines("separate.contained", separate_contained))
     lines.extend(_object_lines(
         "hottest_kernel",
         ledger["hottest_kernel"],

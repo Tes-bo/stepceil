@@ -51,6 +51,10 @@ class LedgerTest(unittest.TestCase):
         self.assertFalse(ledger["allow_rewrite"])
         self.assertIsNone(ledger["ceiling_refused"])
         self.assertIsNone(ledger["hottest_kernel"]["source"])
+        self.assertEqual(ledger["separate"]["kind"], "kernel")
+        self.assertEqual(ledger["separate"]["name"], "pressure")
+        self.assertEqual(ledger["separate"]["blocking_ns"], 80)
+        self.assertIsNone(ledger["separate"]["contained"])
         readme = (ROOT / "README.md").read_text()
         self.assertIn(render_text(ledger), readme)
         self.assertIn(render_json(ledger), readme)
@@ -63,6 +67,7 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["gpu_busy_ns"], 100)
         self.assertEqual(ledger["gpu_idle_ns"], 0)
         self.assertIsNone(ledger["ceiling_ns"])
+        self.assertIsNone(ledger["separate"])
         self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
         self.assertEqual(ledger["overlap"]["overlap_ns"], 20)
         self.assertFalse(ledger["allow_rewrite"])
@@ -433,6 +438,29 @@ class LedgerTest(unittest.TestCase):
         )
         self.assertEqual(opened["contained"]["contained"]["blocking_ns"], 50)
         self.assertNotIn("contained", opened["contained"]["contained"])
+
+    def test_separate_is_the_longest_piece_that_misses_the_blocker(self):
+        ledger = account(window(0, 100, nvtx=[
+            NvtxOp("phase", 0, 60),
+            NvtxOp("other", 70, 100),
+            NvtxOp("leaf", 10, 30),
+        ]))
+        self.assertEqual(ledger["longest_blocker"]["name"], "phase")
+        self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["contained"]["name"], "leaf")
+        self.assertEqual(ledger["separate"]["name"], "other")
+        self.assertEqual(ledger["separate"]["blocking_ns"], 30)
+        self.assertIsNone(ledger["separate"]["contained"])
+
+        touching = account(window(
+            0, 100,
+            [kernel("pressure", 0, 40)],
+            [SyncOp("context synchronize", 40, 100)],
+        ))
+        self.assertEqual(touching["longest_blocker"]["kind"], "sync")
+        self.assertEqual(touching["separate"]["kind"], "kernel")
+        self.assertEqual(touching["separate"]["start_ns"], 0)
+        self.assertEqual(touching["separate"]["end_ns"], 40)
 
     def test_narrower_range_names_the_same_idle(self):
         ledger = account(window(0, 100, nvtx=[
