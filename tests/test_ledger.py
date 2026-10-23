@@ -391,6 +391,29 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["hottest_kernel"]["name"], "beta")
         self.assertEqual(ledger["ceiling_ns"], 40)
 
+    def test_contained_is_the_longest_op_inside_the_blocker(self):
+        ledger = account(window(0, 100, nvtx=[
+            NvtxOp("phase", 0, 100),
+            NvtxOp("inner", 10, 90),
+            NvtxOp("leaf", 20, 40),
+        ]))
+        self.assertEqual(ledger["longest_blocker"]["name"], "phase")
+        self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["contained"]["kind"], "nvtx")
+        self.assertEqual(ledger["contained"]["name"], "inner")
+        self.assertEqual(ledger["contained"]["blocking_ns"], 80)
+        self.assertIsNone(ledger["contained"]["symbol"])
+
+        alone = account(window(0, 100, nvtx=[NvtxOp("phase", 0, 100)]))
+        self.assertIsNone(alone["contained"])
+
+        same = account(window(0, 100, nvtx=[
+            NvtxOp("phase", -5, 110),
+            NvtxOp("z", 0, 100),
+        ]))
+        self.assertEqual(same["longest_blocker"]["name"], "z")
+        self.assertIsNone(same["contained"])
+
     def test_narrower_range_names_the_same_idle(self):
         ledger = account(window(0, 100, nvtx=[
             NvtxOp("phase", -20, 120),

@@ -67,6 +67,11 @@ def render_text(ledger):
         ("kind", "name", "symbol", "start_ns", "end_ns", "blocking_ns", "source", "bytes"),
     ))
     lines.extend(_object_lines(
+        "contained",
+        ledger["contained"],
+        ("kind", "name", "symbol", "blocking_ns"),
+    ))
+    lines.extend(_object_lines(
         "hottest_kernel",
         ledger["hottest_kernel"],
         ("name", "symbol", "ceiling_ns", "instances", "source"),

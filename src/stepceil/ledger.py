@@ -92,6 +92,7 @@ def account(window):
         for start, end in _gap_pieces(holes, covers)
     )
     longest = _longest(candidates)
+    contained = _contained(longest, candidates)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
@@ -100,6 +101,7 @@ def account(window):
         idle,
         ASSUMPTION_EXCLUSIVE,
         longest,
+        contained,
         hottest,
         ceiling,
         allow,
@@ -418,7 +420,7 @@ def _decision(longest, hottest, allow, refused):
 
 def _refused(window, busy, idle, reason, pair):
     return _ledger(
-        window, busy, idle, reason, None, None, None, False, reason,
+        window, busy, idle, reason, None, None, None, None, False, reason,
         _decision(None, None, False, reason),
         _overlap_payload(pair),
     )
@@ -451,9 +453,38 @@ def _overlap_op(op):
     }
 
 
+def _contained(winner, candidates):
+    """The longest operation strictly inside the winning piece.
+
+    It does not replace the blocker. A wider range can be the piece while
+    a shorter range inside it is where that time went. An equal span is
+    the same piece, not something inside it.
+    """
+    if winner is None:
+        return None
+    inside = [
+        item for item in candidates
+        if item["start_ns"] >= winner["start_ns"]
+        and item["end_ns"] <= winner["end_ns"]
+        and (
+            item["start_ns"] > winner["start_ns"]
+            or item["end_ns"] < winner["end_ns"]
+        )
+    ]
+    if not inside:
+        return None
+    chosen = min(inside, key=_blocker_key)
+    return {
+        "kind": chosen["kind"],
+        "name": chosen["name"],
+        "symbol": chosen["symbol"],
+        "blocking_ns": chosen["blocking_ns"],
+    }
+
+
 def _ledger(
-    window, busy, idle, assumption, longest, hottest, ceiling, allow, refused,
-    decision, overlap,
+    window, busy, idle, assumption, longest, contained, hottest, ceiling,
+    allow, refused, decision, overlap,
 ):
     return {
         "range": window.name,
@@ -464,6 +495,7 @@ def _ledger(
         "gpu_idle_ns": idle,
         "assumption": assumption,
         "longest_blocker": longest,
+        "contained": contained,
         "hottest_kernel": hottest,
         "ceiling_ns": ceiling,
         "allow_rewrite": allow,
