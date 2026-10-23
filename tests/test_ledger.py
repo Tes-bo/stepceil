@@ -68,6 +68,7 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["gpu_idle_ns"], 0)
         self.assertIsNone(ledger["ceiling_ns"])
         self.assertIsNone(ledger["separate"])
+        self.assertIsNone(ledger["further"])
         self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
         self.assertEqual(ledger["overlap"]["overlap_ns"], 20)
         self.assertFalse(ledger["allow_rewrite"])
@@ -461,6 +462,30 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(touching["separate"]["kind"], "kernel")
         self.assertEqual(touching["separate"]["start_ns"], 0)
         self.assertEqual(touching["separate"]["end_ns"], 40)
+
+    def test_further_lists_later_pieces_at_least_a_tenth(self):
+        ledger = account(window(0, 100, nvtx=[
+            NvtxOp("phase", 0, 50),
+            NvtxOp("other", 50, 80),
+            NvtxOp("tail", 80, 95),
+            NvtxOp("inside", 82, 94),
+            NvtxOp("small", 95, 100),
+        ]))
+        self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["separate"]["name"], "other")
+        self.assertEqual([item["name"] for item in ledger["further"]], ["tail"])
+        self.assertEqual(ledger["further"][0]["blocking_ns"], 15)
+        self.assertEqual(ledger["further"][0]["contained"]["name"], "inside")
+
+        exact = account(window(0, 100, nvtx=[
+            NvtxOp("phase", 0, 70),
+            NvtxOp("other", 70, 80),
+            NvtxOp("exact", 80, 90),
+            NvtxOp("tiny", 90, 95),
+        ]))
+        self.assertEqual(exact["separate"]["name"], "other")
+        self.assertEqual([item["name"] for item in exact["further"]], ["exact"])
+        self.assertEqual(exact["further"][0]["blocking_ns"], 10)
 
     def test_narrower_range_names_the_same_idle(self):
         ledger = account(window(0, 100, nvtx=[

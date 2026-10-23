@@ -42,6 +42,7 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 - When the blocker kind is `nvtx`, that range is the code to change. It is not GPU work. The step's own range is not a blocker. `gpu idle` means no synchronization, no host API call, and no other NVTX range covers that piece.
 - `contained` is the longest operation strictly inside the blocker. It is not a second decision. That is where the blocker's time went. `contained.contained` is the longest operation strictly inside that one, and the ledger stops there. Do not rewrite a kernel from either of them. Null means nothing shorter sits inside that piece.
 - `separate` is the longest piece that does not meet the blocker. Touching endpoints do not meet. It is not a second decision. Finish `decision` before changing it.
+- `further` lists each later piece that does not meet the blocker or a piece already listed, and that lasts at least a tenth of the step. A shorter piece is left off. It is not a decision. Do not start on it before `decision`.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
 
 ```

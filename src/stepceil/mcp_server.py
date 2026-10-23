@@ -37,7 +37,9 @@ TOOL = {
         "longest operation strictly inside that piece. It is not a second "
         "decision. contained.contained opens that result once more, then "
         "stops. separate is the longest piece that does not meet the blocker. "
-        "It is not a second decision. "
+        "It is not a second decision. further lists each later piece that "
+        "lasts at least a tenth of the step and does not meet a piece already "
+        "listed. It is not a decision. "
         "More than one process in the step is an error."
     ),
     "inputSchema": {

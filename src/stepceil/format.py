@@ -62,6 +62,21 @@ def _contained_lines(prefix, obj):
     return lines
 
 
+def _further_lines(further):
+    if further is None:
+        return ["further: none"]
+    lines = [f"further: {len(further)}"]
+    fields = (
+        "kind", "name", "symbol", "start_ns", "end_ns",
+        "blocking_ns", "source", "bytes",
+    )
+    for index, item in enumerate(further):
+        prefix = f"further.{index}"
+        lines.extend(_object_lines(prefix, item, fields))
+        lines.extend(_contained_lines(f"{prefix}.contained", item["contained"]))
+    return lines
+
+
 def render_text(ledger):
     lines = [
         f"range: {ledger['range']}",
@@ -87,6 +102,7 @@ def render_text(ledger):
     if ledger["separate"] is not None:
         separate_contained = ledger["separate"]["contained"]
     lines.extend(_contained_lines("separate.contained", separate_contained))
+    lines.extend(_further_lines(ledger["further"]))
     lines.extend(_object_lines(
         "hottest_kernel",
         ledger["hottest_kernel"],

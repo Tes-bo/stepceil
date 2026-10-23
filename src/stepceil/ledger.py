@@ -94,6 +94,7 @@ def account(window):
     longest = _longest(candidates)
     contained = _contained(longest, candidates, nest=True)
     separate = _separate(longest, candidates)
+    further = _further(longest, separate, candidates, step_time)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
@@ -104,6 +105,7 @@ def account(window):
         longest,
         contained,
         separate,
+        further,
         hottest,
         ceiling,
         allow,
@@ -422,7 +424,9 @@ def _decision(longest, hottest, allow, refused):
 
 def _refused(window, busy, idle, reason, pair):
     return _ledger(
-        window, busy, idle, reason, None, None, None, None, None, False, reason,
+        window, busy, idle, reason,
+        None, None, None, None, None, None,
+        False, reason,
         _decision(None, None, False, reason),
         _overlap_payload(pair),
     )
@@ -508,9 +512,38 @@ def _separate(winner, candidates):
     return chosen
 
 
+def _misses(item, other):
+    return item["end_ns"] <= other["start_ns"] or item["start_ns"] >= other["end_ns"]
+
+
+def _further(winner, separate, candidates, step_time):
+    """Later pieces that do not meet the blocker or a piece already listed.
+
+    Each one is at least a tenth of the step, the same bar as allow_rewrite.
+    A shorter piece is left off. This does not replace the decision.
+    """
+    if winner is None:
+        return None
+    taken = [winner]
+    if separate is not None:
+        taken.append(separate)
+    rest = candidates
+    found = []
+    while True:
+        rest = [item for item in rest if all(_misses(item, earlier) for earlier in taken)]
+        chosen = _longest(rest)
+        if chosen is None or not _allows_rewrite(chosen["blocking_ns"], step_time):
+            break
+        chosen = dict(chosen)
+        chosen["contained"] = _contained(chosen, candidates, nest=True)
+        found.append(chosen)
+        taken.append(chosen)
+    return found
+
+
 def _ledger(
-    window, busy, idle, assumption, longest, contained, separate, hottest,
-    ceiling, allow, refused, decision, overlap,
+    window, busy, idle, assumption, longest, contained, separate, further,
+    hottest, ceiling, allow, refused, decision, overlap,
 ):
     return {
         "range": window.name,
@@ -523,6 +556,7 @@ def _ledger(
         "longest_blocker": longest,
         "contained": contained,
         "separate": separate,
+        "further": further,
         "hottest_kernel": hottest,
         "ceiling_ns": ceiling,
         "allow_rewrite": allow,
