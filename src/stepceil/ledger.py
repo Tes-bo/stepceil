@@ -95,6 +95,7 @@ def account(window):
     contained = _contained(longest, candidates, nest=True)
     separate = _separate(longest, candidates)
     further = _further(longest, separate, candidates, step_time)
+    repeated = _repeated(_sync_pieces(holes, runtime), step_time)
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
@@ -106,6 +107,7 @@ def account(window):
         contained,
         separate,
         further,
+        repeated,
         hottest,
         ceiling,
         allow,
@@ -425,7 +427,7 @@ def _decision(longest, hottest, allow, refused):
 def _refused(window, busy, idle, reason, pair):
     return _ledger(
         window, busy, idle, reason,
-        None, None, None, None, None, None,
+        None, None, None, None, None, None, None,
         False, reason,
         _decision(None, None, False, reason),
         _overlap_payload(pair),
@@ -541,9 +543,33 @@ def _further(winner, separate, candidates, step_time):
     return found
 
 
+def _repeated(pieces, step_time):
+    """One host API whose idle pieces together last a tenth of the step.
+
+    One call, even when a kernel splits it, is not repeated. The union is
+    not a blocker's time: the pieces stay separate, and the decision does
+    not change.
+    """
+    grouped = {}
+    for start, end, call in pieces:
+        spans, calls = grouped.setdefault(call.name, ([], set()))
+        spans.append((start, end))
+        calls.add(id(call))
+    found = []
+    for name, (spans, calls) in grouped.items():
+        if len(calls) < 2:
+            continue
+        idle = length(merge(spans))
+        if not _allows_rewrite(idle, step_time):
+            continue
+        found.append({"name": name, "idle_ns": idle, "calls": len(calls)})
+    found.sort(key=lambda item: (-item["idle_ns"], item["name"]))
+    return found
+
+
 def _ledger(
     window, busy, idle, assumption, longest, contained, separate, further,
-    hottest, ceiling, allow, refused, decision, overlap,
+    repeated, hottest, ceiling, allow, refused, decision, overlap,
 ):
     return {
         "range": window.name,
@@ -557,6 +583,7 @@ def _ledger(
         "contained": contained,
         "separate": separate,
         "further": further,
+        "repeated": repeated,
         "hottest_kernel": hottest,
         "ceiling_ns": ceiling,
         "allow_rewrite": allow,

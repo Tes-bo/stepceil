@@ -43,6 +43,7 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 - `contained` is the longest operation strictly inside the blocker. It is not a second decision. That is where the blocker's time went. `contained.contained` is the longest operation strictly inside that one, and the ledger stops there. Do not rewrite a kernel from either of them. Null means nothing shorter sits inside that piece.
 - `separate` is the longest piece that does not meet the blocker. Touching endpoints do not meet. It is not a second decision. Finish `decision` before changing it.
 - `further` lists each later piece that does not meet the blocker or a piece already listed, and that lasts at least a tenth of the step. A shorter piece is left off. It is not a decision. Do not start on it before `decision`.
+- `repeated` is a host API whose idle pieces together last at least a tenth of the step. One call is not repeated, even when a kernel splits it. Do not add `idle_ns` to the blocker. It is not one call's blocking time, and it is not a decision.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
 
 ```

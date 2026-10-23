@@ -77,6 +77,18 @@ def _further_lines(further):
     return lines
 
 
+def _repeated_lines(repeated):
+    if repeated is None:
+        return ["repeated: none"]
+    lines = [f"repeated: {len(repeated)}"]
+    for index, item in enumerate(repeated):
+        prefix = f"repeated.{index}"
+        lines.append(f"{prefix}.name: {item['name']}")
+        lines.append(f"{prefix}.idle_ns: {item['idle_ns']}")
+        lines.append(f"{prefix}.calls: {item['calls']}")
+    return lines
+
+
 def render_text(ledger):
     lines = [
         f"range: {ledger['range']}",
@@ -103,6 +115,7 @@ def render_text(ledger):
         separate_contained = ledger["separate"]["contained"]
     lines.extend(_contained_lines("separate.contained", separate_contained))
     lines.extend(_further_lines(ledger["further"]))
+    lines.extend(_repeated_lines(ledger["repeated"]))
     lines.extend(_object_lines(
         "hottest_kernel",
         ledger["hottest_kernel"],

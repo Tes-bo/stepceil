@@ -69,6 +69,7 @@ class LedgerTest(unittest.TestCase):
         self.assertIsNone(ledger["ceiling_ns"])
         self.assertIsNone(ledger["separate"])
         self.assertIsNone(ledger["further"])
+        self.assertIsNone(ledger["repeated"])
         self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
         self.assertEqual(ledger["overlap"]["overlap_ns"], 20)
         self.assertFalse(ledger["allow_rewrite"])
@@ -486,6 +487,30 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(exact["separate"]["name"], "other")
         self.assertEqual([item["name"] for item in exact["further"]], ["exact"])
         self.assertEqual(exact["further"][0]["blocking_ns"], 10)
+
+    def test_repeated_is_many_calls_of_one_api(self):
+        launches = [
+            RuntimeOp("cudaLaunchKernel_v7000", start, start + 10)
+            for start in (0, 20, 40, 60)
+        ]
+        ledger = account(window(
+            0, 100,
+            nvtx=[NvtxOp("phase", 0, 100)],
+            runtime=launches + [RuntimeOp("cudaMallocHost_v3020", 80, 90)],
+        ))
+        self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["repeated"], [{
+            "name": "cudaLaunchKernel_v7000",
+            "idle_ns": 40,
+            "calls": 4,
+        }])
+
+        split = account(window(
+            0, 100,
+            [kernel("pressure", 40, 60)],
+            runtime=[RuntimeOp("cudaLaunchKernel_v7000", 0, 100)],
+        ))
+        self.assertEqual(split["repeated"], [])
 
     def test_narrower_range_names_the_same_idle(self):
         ledger = account(window(0, 100, nvtx=[

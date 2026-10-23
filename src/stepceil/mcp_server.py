@@ -39,7 +39,9 @@ TOOL = {
         "stops. separate is the longest piece that does not meet the blocker. "
         "It is not a second decision. further lists each later piece that "
         "lasts at least a tenth of the step and does not meet a piece already "
-        "listed. It is not a decision. "
+        "listed. It is not a decision. repeated is a host API whose idle "
+        "pieces together last at least a tenth of the step. Do not add that "
+        "idle to a blocker. "
         "More than one process in the step is an error."
     ),
     "inputSchema": {
