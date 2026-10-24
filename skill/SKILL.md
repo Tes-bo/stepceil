@@ -44,6 +44,7 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 - `separate` is the longest piece that does not meet the blocker. Touching endpoints do not meet. It is not a second decision. Finish `decision` before changing it.
 - `further` lists each later piece that does not meet the blocker or a piece already listed, and that lasts at least a tenth of the step. A shorter piece is left off. It is not a decision. Do not start on it before `decision`.
 - `repeated` lists a host API, and an NVTX range whose every idle piece is shorter than a tenth of the step, when two or more calls together last at least that tenth. One call is not repeated, even when a kernel splits it. A range that already has one idle piece that long is already named, so it is not listed again. A range whose idle sits inside another listed range is left off. When two ranges cover the same idle, the narrower one remains. Do not add `idle_ns` to the blocker, and do not add two `repeated` entries together. `idle_ns` is not one call's blocking time, and it is not a decision.
+- `short_idle_ns` is idle the blocker, `separate`, and `further` do not cover. `short_idle_longest_ns` is the longest contiguous stretch of that idle. Several calls can tile one stretch. The stretch is not a call, not a name, and not a decision. Do not add `short_idle_ns` to the blocker or to a `repeated` entry. Zero means those pieces already cover the idle.
 - After a change, capture the same NVTX range again and compare the two exports. Do not claim the step got faster unless `faster` is true.
 
 ```

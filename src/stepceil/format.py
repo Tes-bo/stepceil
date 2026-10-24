@@ -117,6 +117,10 @@ def render_text(ledger):
     lines.extend(_contained_lines("separate.contained", separate_contained))
     lines.extend(_further_lines(ledger["further"]))
     lines.extend(_repeated_lines(ledger["repeated"]))
+    lines.append(f"short_idle_ns: {_cell(ledger['short_idle_ns'])}")
+    lines.append(
+        f"short_idle_longest_ns: {_cell(ledger['short_idle_longest_ns'])}"
+    )
     lines.extend(_object_lines(
         "hottest_kernel",
         ledger["hottest_kernel"],

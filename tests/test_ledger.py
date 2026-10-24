@@ -55,6 +55,8 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["separate"]["name"], "pressure")
         self.assertEqual(ledger["separate"]["blocking_ns"], 80)
         self.assertIsNone(ledger["separate"]["contained"])
+        self.assertEqual(ledger["short_idle_ns"], 0)
+        self.assertEqual(ledger["short_idle_longest_ns"], 0)
         readme = (ROOT / "README.md").read_text()
         self.assertIn(render_text(ledger), readme)
         self.assertIn(render_json(ledger), readme)
@@ -70,6 +72,8 @@ class LedgerTest(unittest.TestCase):
         self.assertIsNone(ledger["separate"])
         self.assertIsNone(ledger["further"])
         self.assertIsNone(ledger["repeated"])
+        self.assertIsNone(ledger["short_idle_ns"])
+        self.assertIsNone(ledger["short_idle_longest_ns"])
         self.assertEqual(ledger["ceiling_refused"], ASSUMPTION_MULTI)
         self.assertEqual(ledger["overlap"]["overlap_ns"], 20)
         self.assertFalse(ledger["allow_rewrite"])
@@ -487,6 +491,27 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(exact["separate"]["name"], "other")
         self.assertEqual([item["name"] for item in exact["further"]], ["exact"])
         self.assertEqual(exact["further"][0]["blocking_ns"], 10)
+        self.assertEqual(ledger["short_idle_ns"], 5)
+        self.assertEqual(ledger["short_idle_longest_ns"], 5)
+        self.assertEqual(exact["short_idle_ns"], 10)
+        self.assertEqual(exact["short_idle_longest_ns"], 10)
+
+    def test_short_idle_keeps_a_stretch_tiled_by_shorter_calls(self):
+        ledger = account(window(
+            0, 100,
+            [kernel("tail", 67, 100)],
+            nvtx=[
+                NvtxOp("phase", 0, 40),
+                NvtxOp("other", 40, 55),
+                NvtxOp("left", 55, 61),
+                NvtxOp("right", 61, 67),
+            ],
+        ))
+        self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["separate"]["name"], "tail")
+        self.assertEqual([item["name"] for item in ledger["further"]], ["other"])
+        self.assertEqual(ledger["short_idle_ns"], 12)
+        self.assertEqual(ledger["short_idle_longest_ns"], 12)
 
     def test_repeated_is_many_calls_of_one_api(self):
         launches = [
@@ -499,6 +524,8 @@ class LedgerTest(unittest.TestCase):
             runtime=launches + [RuntimeOp("cudaMallocHost_v3020", 80, 90)],
         ))
         self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["short_idle_ns"], 0)
+        self.assertEqual(ledger["short_idle_longest_ns"], 0)
         self.assertEqual(ledger["repeated"], [{
             "kind": "runtime",
             "name": "cudaLaunchKernel_v7000",
@@ -542,6 +569,8 @@ class LedgerTest(unittest.TestCase):
             ],
         ))
         self.assertEqual(ledger["decision"], "change phase first")
+        self.assertEqual(ledger["short_idle_ns"], 16)
+        self.assertEqual(ledger["short_idle_longest_ns"], 8)
         self.assertEqual(ledger["repeated"], [
             {
                 "kind": "nvtx",

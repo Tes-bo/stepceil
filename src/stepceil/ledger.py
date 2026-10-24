@@ -17,6 +17,7 @@ ASSUMPTION_EXCLUSIVE = "single stream, no overlapping device work"
 ASSUMPTION_MULTI = "overlapping device work on more than one stream"
 ASSUMPTION_SAME = "device activities overlap on one stream"
 GPU_IDLE_NAME = "gpu idle"
+_IDLE_KINDS = frozenset(("sync", "runtime", "nvtx", "gap"))
 
 KIND_RANK = {
     "kernel": 0,
@@ -100,6 +101,9 @@ def account(window):
         _sync_pieces(holes, nvtx),
         step_time,
     )
+    short_idle, short_longest = _short_idle(
+        longest, separate, further, holes, idle,
+    )
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
@@ -112,6 +116,8 @@ def account(window):
         separate,
         further,
         repeated,
+        short_idle,
+        short_longest,
         hottest,
         ceiling,
         allow,
@@ -431,7 +437,7 @@ def _decision(longest, hottest, allow, refused):
 def _refused(window, busy, idle, reason, pair):
     return _ledger(
         window, busy, idle, reason,
-        None, None, None, None, None, None, None,
+        None, None, None, None, None, None, None, None, None,
         False, reason,
         _decision(None, None, False, reason),
         _overlap_payload(pair),
@@ -547,6 +553,54 @@ def _further(winner, separate, candidates, step_time):
     return found
 
 
+def _short_idle(winner, separate, further, holes, idle):
+    """Idle the named pieces leave, and the longest stretch of that idle.
+
+    The named pieces are the blocker, separate, and further, and only when
+    they are idle. A kernel, copy, or memset does not cover idle. The
+    longest stretch is one contiguous remainder. Several calls can tile it,
+    so it is not a call and not a blocker.
+    """
+    if winner is None:
+        return None, None
+    named = [winner]
+    if separate is not None:
+        named.append(separate)
+    if further:
+        named.extend(further)
+    covered = merge(
+        (item["start_ns"], item["end_ns"])
+        for item in named
+        if item["kind"] in _IDLE_KINDS
+    )
+    remainder = _subtract(holes, covered)
+    short = length(remainder)
+    longest = max((end - start for start, end in remainder), default=0)
+    if short < 0 or longest > short or short + length(covered) != idle:
+        raise RuntimeError("short idle does not add up to the step idle")
+    return short, longest
+
+
+def _subtract(spans, cut):
+    """Remove merged cut intervals from merged spans. Touching does not overlap."""
+    kept = []
+    for start, end in spans:
+        cursor = start
+        for cut_start, cut_end in cut:
+            if cut_end <= cursor:
+                continue
+            if cut_start >= end:
+                break
+            if cut_start > cursor:
+                kept.append((cursor, min(cut_start, end)))
+            cursor = max(cursor, cut_end)
+            if cursor >= end:
+                break
+        if cursor < end:
+            kept.append((cursor, end))
+    return kept
+
+
 def _repeated(runtime_pieces, nvtx_pieces, step_time):
     """Host APIs, and ranges that never form one long idle piece.
 
@@ -634,7 +688,8 @@ def _intersection_length(left, right):
 
 def _ledger(
     window, busy, idle, assumption, longest, contained, separate, further,
-    repeated, hottest, ceiling, allow, refused, decision, overlap,
+    repeated, short_idle, short_longest, hottest, ceiling, allow, refused,
+    decision, overlap,
 ):
     return {
         "range": window.name,
@@ -649,6 +704,8 @@ def _ledger(
         "separate": separate,
         "further": further,
         "repeated": repeated,
+        "short_idle_ns": short_idle,
+        "short_idle_longest_ns": short_longest,
         "hottest_kernel": hottest,
         "ceiling_ns": ceiling,
         "allow_rewrite": allow,

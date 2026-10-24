@@ -44,6 +44,9 @@ TOOL = {
         "step, when two or more calls together last at least that tenth. "
         "A range inside another listed range is left off. Do not add that "
         "idle to a blocker, and do not add two repeated entries together. "
+        "short_idle_ns is idle those pieces do not cover. "
+        "short_idle_longest_ns is the longest stretch of that idle, not a "
+        "call and not a decision. Do not add it to a blocker or to repeated. "
         "More than one process in the step is an error."
     ),
     "inputSchema": {
