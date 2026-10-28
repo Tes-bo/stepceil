@@ -60,3 +60,5 @@ class StepWindow:
     syncs: tuple[SyncOp, ...]
     runtime_ops: tuple[RuntimeOp, ...] = ()
     nvtx_ops: tuple[NvtxOp, ...] = ()
+    # Process that pushed the step range, in globalPid form.
+    process_id: int | None = None

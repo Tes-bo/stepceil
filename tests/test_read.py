@@ -439,6 +439,81 @@ class ReadTest(unittest.TestCase):
                 "cudaDeviceSynchronize",
             )
 
+    def test_step_range_names_its_process(self):
+        own = 10 << 24
+        other = 11 << 24
+        cases = (
+            ("own", own, own, "runtime"),
+            ("foreign_call", own, other, "gap"),
+            ("unnamed_kernel", None, other, "gap"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for label, kernel_pid, call_pid, kind in cases:
+                path = Path(tmp) / f"{label}.sqlite"
+                _export_step_process(path, own | 5, kernel_pid, call_pid | 3)
+                loaded = load_path(path, "step")
+                self.assertEqual(loaded.process_id, own)
+                ledger = account(loaded)
+                self.assertEqual(ledger["longest_blocker"]["kind"], kind, label)
+
+            foreign = Path(tmp) / "foreign.sqlite"
+            _export_step_process(foreign, own | 5, other, other | 3)
+            with self.assertRaisesRegex(
+                StepceilError, f"process ids {own}, {other}",
+            ):
+                account(load_path(foreign, "step"))
+
+    def test_kernel_name_falls_back_on_each_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "CREATE TABLE StringIds (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            connection.execute(
+                """
+                CREATE TABLE NVTX_EVENTS (
+                    start INTEGER, end INTEGER, eventType INTEGER, text TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (
+                    start INTEGER, end INTEGER, deviceId INTEGER,
+                    streamId INTEGER, shortName INTEGER,
+                    demangledName INTEGER, mangledName INTEGER
+                )
+                """
+            )
+            connection.execute("INSERT INTO StringIds VALUES (3, 'void sum<int>()')")
+            connection.execute("INSERT INTO StringIds VALUES (4, '_Z3sumIiEv')")
+            connection.execute("INSERT INTO NVTX_EVENTS VALUES (0, 30, 59, 'step')")
+            # shortName is null, and id 99 is not in StringIds.
+            connection.execute(
+                "INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (0, 20, 0, 1, NULL, 3, 99)"
+            )
+            connection.execute(
+                "INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (20, 30, 0, 1, 99, NULL, 4)"
+            )
+            connection.commit()
+            connection.close()
+            ops = load_path(path, "step").device_ops
+            self.assertEqual(
+                [(op.name, op.symbol) for op in ops],
+                [
+                    ("void sum<int>()", "void sum<int>()"),
+                    ("_Z3sumIiEv", "_Z3sumIiEv"),
+                ],
+            )
+
+    def test_step_without_a_start_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(path, [{"text": "step", "start": None, "end": 10}])
+            with self.assertRaisesRegex(StepceilError, "no start timestamp"):
+                load_path(path, "step")
+
     def test_readme_examples_are_the_exports_in_the_repository(self):
         readme = (ROOT / "README.md").read_text()
         examples = ROOT / "examples"
@@ -512,6 +587,41 @@ def _export_sync_runtime(path, label, calls):
             "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (?, ?, 9, ?)",
             (start, end, index),
         )
+    connection.commit()
+    connection.close()
+
+
+def _export_step_process(path, step_tid, kernel_pid, call_tid):
+    """A 100 ns step, a 20 ns kernel, and a host call on the idle after it."""
+    write_export(
+        path,
+        [{"text": "step", "start": 0, "end": 100}],
+        kernels=[{"name": "pressure", "start": 0, "end": 20}],
+    )
+    connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE NVTX_EVENTS ADD COLUMN globalTid INTEGER")
+    connection.execute("UPDATE NVTX_EVENTS SET globalTid = ?", (step_tid,))
+    connection.execute(
+        "ALTER TABLE CUPTI_ACTIVITY_KIND_KERNEL ADD COLUMN globalPid INTEGER"
+    )
+    connection.execute(
+        "UPDATE CUPTI_ACTIVITY_KIND_KERNEL SET globalPid = ?", (kernel_pid,),
+    )
+    connection.execute(
+        """
+        CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (
+            start INTEGER, end INTEGER, globalTid INTEGER,
+            correlationId INTEGER, nameId INTEGER
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO StringIds (id, value) VALUES (900, 'cudaMallocHost_v3020')"
+    )
+    connection.execute(
+        "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (20, 90, ?, 1, 900)",
+        (call_tid,),
+    )
     connection.commit()
     connection.close()
 

@@ -36,94 +36,71 @@ def account(window):
             f"NVTX range {window.name!r} ends at or before it starts"
         )
     clipped = []
-    clipped_sources = []
+    candidates = []
     for op in window.device_ops:
         piece = _clip_op(op, window.start_ns, window.end_ns)
         if piece is not None:
             clipped.append(piece)
-            clipped_sources.append(op)
-    _require_identity(
-        clipped, window.name, window.syncs, window.start_ns, window.end_ns,
-    )
+            candidates.append(_op_candidate(piece, op))
+    process = _require_identity(window, clipped)
 
     step_time = window.end_ns - window.start_ns
     busy_spans = merge((op.start_ns, op.end_ns) for op in clipped)
     busy = length(busy_spans)
     idle = step_time - busy
-    if busy + idle != step_time or busy < 0 or idle < 0:
-        raise RuntimeError("busy and idle do not add up to the step")
 
     overlap_kind, overlap_pair = _scan_overlap(clipped)
-    if overlap_kind == "multi":
-        return _refused(window, busy, idle, ASSUMPTION_MULTI, overlap_pair)
-    if overlap_kind == "same":
-        return _refused(window, busy, idle, ASSUMPTION_SAME, overlap_pair)
+    if overlap_kind is not None:
+        reason = ASSUMPTION_MULTI if overlap_kind == "multi" else ASSUMPTION_SAME
+        return _ledger(
+            window, busy, idle, reason,
+            refused=reason,
+            decision=_decision(None, None, False, reason),
+            overlap=_overlap_payload(overlap_pair),
+        )
 
     holes = complement(busy_spans, window.start_ns, window.end_ns)
-    runtime = _runtime_for_step(window.runtime_ops, clipped, window.syncs)
-    nvtx = _runtime_for_step(window.nvtx_ops, clipped, window.syncs)
-    covers = (*window.syncs, *runtime, *nvtx)
-    candidates = [
-        _op_candidate(piece, source)
-        for piece, source in zip(clipped, clipped_sources)
-    ]
-    candidates.extend(
-        _candidate(
-            "sync", sync.name, start, end,
-            source_start=sync.start_ns, source_end=sync.end_ns,
+    runtime = _same_process(window.runtime_ops, process)
+    nvtx = _same_process(window.nvtx_ops, process)
+    runtime_pieces = _idle_pieces(holes, runtime)
+    nvtx_pieces = _idle_pieces(holes, nvtx)
+    for kind, pieces in (
+        ("sync", _idle_pieces(holes, window.syncs)),
+        ("runtime", runtime_pieces),
+        ("nvtx", nvtx_pieces),
+    ):
+        candidates.extend(
+            _candidate(
+                kind, call.name, start, end,
+                source_start=call.start_ns, source_end=call.end_ns,
+            )
+            for start, end, call in pieces
         )
-        for start, end, sync in _sync_pieces(holes, window.syncs)
-    )
-    candidates.extend(
-        _candidate(
-            "runtime", call.name, start, end,
-            source_start=call.start_ns, source_end=call.end_ns,
-        )
-        for start, end, call in _sync_pieces(holes, runtime)
-    )
-    candidates.extend(
-        _candidate(
-            "nvtx", span.name, start, end,
-            source_start=span.start_ns, source_end=span.end_ns,
-        )
-        for start, end, span in _sync_pieces(holes, nvtx)
-    )
     candidates.extend(
         _candidate("gap", GPU_IDLE_NAME, start, end)
-        for start, end in _gap_pieces(holes, covers)
+        for start, end in _gap_pieces(holes, (*window.syncs, *runtime, *nvtx))
     )
     longest = _longest(candidates)
-    contained = _contained(longest, candidates, nest=True)
     separate = _separate(longest, candidates)
     further = _further(longest, separate, candidates, step_time)
-    repeated = _repeated(
-        _sync_pieces(holes, runtime),
-        _sync_pieces(holes, nvtx),
-        step_time,
-    )
     short_idle, short_longest = _short_idle(
         longest, separate, further, holes, idle,
     )
     hottest, ceiling = _hottest([op for op in clipped if op.kind == "kernel"])
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
-        window,
-        busy,
-        idle,
-        ASSUMPTION_EXCLUSIVE,
-        longest,
-        contained,
-        separate,
-        further,
-        repeated,
-        short_idle,
-        short_longest,
-        hottest,
-        ceiling,
-        allow,
-        None,
-        _decision(longest, hottest, allow, None),
-        None,
+        window, busy, idle, ASSUMPTION_EXCLUSIVE,
+        longest=longest,
+        contained=_contained(longest, candidates, nest=True),
+        separate=separate,
+        further=further,
+        repeated=_repeated(runtime_pieces, nvtx_pieces, step_time),
+        short_idle=short_idle,
+        short_longest=short_longest,
+        hottest=hottest,
+        ceiling=ceiling,
+        allow=allow,
+        decision=_decision(longest, hottest, allow, None),
     )
 
 
@@ -210,7 +187,13 @@ def _clip_op(op, lo, hi):
     return replace(op, start_ns=start, end_ns=end, byte_count=byte_count)
 
 
-def _require_identity(ops, range_name, syncs=(), lo=None, hi=None):
+def _require_identity(window, ops):
+    """Refuse a step on more than one GPU or process. Return the process.
+
+    The process is the one named by the step range, the clipped device
+    work, or a synchronization that meets the step. None means nothing
+    in the step names one.
+    """
     if any(op.device_id is None for op in ops):
         raise StepceilError("a device operation has no device id")
     if any(op.stream_id is None for op in ops):
@@ -225,32 +208,37 @@ def _require_identity(ops, range_name, syncs=(), lo=None, hi=None):
     if len(devices) > 1:
         ids = ", ".join(str(device) for device in devices)
         raise StepceilError(
-            f"more than one GPU in NVTX range {range_name!r} "
+            f"more than one GPU in NVTX range {window.name!r} "
             f"(device ids {ids}); this version does not account that"
         )
     # Stream ids are per process. Two processes in one export reuse them,
     # so the other process is not this step's stream and not its ceiling.
+    # Work that only another process launched inside this step's range is
+    # not this step's work either.
     processes = {op.process_id for op in ops if op.process_id is not None}
-    if lo is not None:
-        for sync in syncs:
-            if sync.process_id is None:
-                continue
-            if sync.end_ns > lo and sync.start_ns < hi:
-                processes.add(sync.process_id)
+    processes.update(
+        sync.process_id for sync in window.syncs
+        if sync.process_id is not None
+        and sync.end_ns > window.start_ns
+        and sync.start_ns < window.end_ns
+    )
+    if window.process_id is not None:
+        processes.add(window.process_id)
     processes = sorted(processes)
     if len(processes) > 1:
         ids = ", ".join(str(process) for process in processes)
         raise StepceilError(
-            f"more than one process in NVTX range {range_name!r} "
+            f"more than one process in NVTX range {window.name!r} "
             f"(process ids {ids}); this version does not account that"
         )
+    return processes[0] if processes else None
 
 
 def _stream_key(op):
     return (op.context_id, op.stream_id)
 
 
-def _sync_pieces(holes, syncs):
+def _idle_pieces(holes, syncs):
     """Idle covered by each call, one contiguous piece at a time.
 
     A shorter call that overlaps a longer one does not take that idle away.
@@ -279,19 +267,17 @@ def _sync_pieces(holes, syncs):
     return pieces
 
 
-def _runtime_for_step(runtime_ops, device_ops, syncs):
-    """Host calls from this step's process.
+def _same_process(calls, process):
+    """Host calls or ranges from this step's process.
 
     A call from another process is not this step's blocker. When the step
     names no process, every call stays: there is nothing to reject it with.
     """
-    known = {op.process_id for op in device_ops if op.process_id is not None}
-    known.update(sync.process_id for sync in syncs if sync.process_id is not None)
-    if not known:
-        return runtime_ops
+    if process is None:
+        return tuple(calls)
     return tuple(
-        call for call in runtime_ops
-        if call.process_id is None or call.process_id in known
+        call for call in calls
+        if call.process_id is None or call.process_id == process
     )
 
 
@@ -302,7 +288,7 @@ def _gap_pieces(holes, covers):
     call must not make every hole rescan the whole list.
     """
     covered = merge(
-        (start, end) for start, end, _call in _sync_pieces(holes, covers)
+        (start, end) for start, end, _call in _idle_pieces(holes, covers)
     )
     gaps = []
     index = 0
@@ -432,16 +418,6 @@ def _decision(longest, hottest, allow, refused):
     ):
         return f"rewrite {hottest['name']}"
     return f"change {longest['name']} first"
-
-
-def _refused(window, busy, idle, reason, pair):
-    return _ledger(
-        window, busy, idle, reason,
-        None, None, None, None, None, None, None, None, None,
-        False, reason,
-        _decision(None, None, False, reason),
-        _overlap_payload(pair),
-    )
 
 
 def _overlap_payload(pair):
@@ -687,10 +663,12 @@ def _intersection_length(left, right):
 
 
 def _ledger(
-    window, busy, idle, assumption, longest, contained, separate, further,
-    repeated, short_idle, short_longest, hottest, ceiling, allow, refused,
-    decision, overlap,
+    window, busy, idle, assumption, *, decision,
+    longest=None, contained=None, separate=None, further=None,
+    repeated=None, short_idle=None, short_longest=None, hottest=None,
+    ceiling=None, allow=False, refused=None, overlap=None,
 ):
+    """The ledger dict. A refused step leaves every accounting field null."""
     return {
         "range": window.name,
         "step_start_ns": window.start_ns,
