@@ -36,6 +36,13 @@ def main(argv=None):
         description=(
             "Speedup ceiling of one GPU step from an nsys sqlite export."
         ),
+        epilog=(
+            "other commands:\n"
+            "  stepceil ranges SQLITE [--json]          list NVTX range names\n"
+            "  stepceil diff BEFORE AFTER --range NAME  compare two steps\n"
+            "  stepceil mcp                             serve MCP on stdio"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version",
