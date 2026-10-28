@@ -2,6 +2,9 @@
 
 step_ceiling, step_diff, and step_ranges call the same functions as the
 command line. They do not compute a second ceiling.
+
+The stdio transport is one JSON-RPC message per line, UTF-8, with no
+embedded newline. It is not the Content-Length framing of LSP.
 """
 
 import json
@@ -15,10 +18,12 @@ from stepceil.format import render_json
 from stepceil.ledger import account
 from stepceil.nsys import list_ranges, load_path
 
+# Oldest first. A client that asks for another version gets the latest.
 SUPPORTED_PROTOCOLS = (
     "2024-11-05",
     "2025-03-26",
     "2025-06-18",
+    "2025-11-25",
 )
 
 TOOL = {
@@ -118,15 +123,20 @@ DIFF_TOOL = {
 
 
 def serve(stdin=None, stdout=None):
+    """Answer one message per line until stdin closes. Return 0."""
     incoming = sys.stdin.buffer if stdin is None else stdin
     outgoing = sys.stdout.buffer if stdout is None else stdout
     while True:
-        try:
-            message = _read_message(incoming)
-        except (StepceilError, json.JSONDecodeError, UnicodeError, ValueError):
-            return 1
-        if message is None:
+        line = incoming.readline()
+        if not line:
             return 0
+        if not line.strip():
+            continue
+        try:
+            message = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            _write_message(outgoing, _error(None, -32700, "parse error"))
+            continue
         response = _handle(message)
         if response is not None:
             _write_message(outgoing, response)
@@ -136,14 +146,20 @@ def _handle(message):
     if not isinstance(message, dict):
         return _error(None, -32600, "request is not an object")
     method = message.get("method")
-    msg_id = message.get("id")
-    if isinstance(method, str) and method.startswith("notifications/"):
+    if not isinstance(method, str):
+        # A response to a request this server never sends.
         return None
+    if "id" not in message:
+        # A notification gets no reply, known or not.
+        return None
+    msg_id = message["id"]
+    params = message.get("params") or {}
+    if not isinstance(params, dict):
+        return _error(msg_id, -32602, "params is not an object")
     if method == "initialize":
-        params = message.get("params") or {}
-        protocol = params.get("protocolVersion") or SUPPORTED_PROTOCOLS[0]
+        protocol = params.get("protocolVersion")
         if protocol not in SUPPORTED_PROTOCOLS:
-            protocol = SUPPORTED_PROTOCOLS[0]
+            protocol = SUPPORTED_PROTOCOLS[-1]
         return {
             "jsonrpc": "2.0",
             "id": msg_id,
@@ -162,20 +178,22 @@ def _handle(message):
             "result": {"tools": [TOOL, DIFF_TOOL, RANGES_TOOL]},
         }
     if method == "tools/call":
-        return _call(msg_id, message.get("params") or {})
+        return _call(msg_id, params)
     return _error(msg_id, -32601, f"unknown method: {method}")
 
 
 def _call(msg_id, params):
     name = params.get("name")
     arguments = params.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        return _tool_result(msg_id, "arguments must be an object", True)
     if name == TOOL["name"]:
         return _ceiling_call(msg_id, arguments)
     if name == DIFF_TOOL["name"]:
         return _diff_call(msg_id, arguments)
     if name == RANGES_TOOL["name"]:
         return _ranges_call(msg_id, arguments)
-    return _tool_result(msg_id, f"unknown tool: {name}", True)
+    return _error(msg_id, -32602, f"unknown tool: {name}")
 
 
 def _ceiling_call(msg_id, arguments):
@@ -242,35 +260,7 @@ def _error(msg_id, code, message):
     }
 
 
-def _read_message(stream):
-    header = b""
-    while b"\r\n\r\n" not in header:
-        chunk = stream.read(1)
-        if not chunk:
-            if header:
-                raise StepceilError("incomplete MCP header")
-            return None
-        header += chunk
-        if len(header) > 1024 * 1024:
-            raise StepceilError("MCP header is too large")
-    raw_header, rest = header.split(b"\r\n\r\n", 1)
-    length = None
-    for line in raw_header.split(b"\r\n"):
-        if line.lower().startswith(b"content-length:"):
-            length = int(line.split(b":", 1)[1].strip())
-    if length is None or length < 0:
-        raise StepceilError("MCP header has no Content-Length")
-    body = rest
-    while len(body) < length:
-        chunk = stream.read(length - len(body))
-        if not chunk:
-            raise StepceilError("incomplete MCP body")
-        body += chunk
-    return json.loads(body.decode("utf-8"))
-
-
 def _write_message(stream, payload):
-    body = json.dumps(payload).encode("utf-8")
-    stream.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii"))
-    stream.write(body)
+    # json.dumps escapes newlines inside strings, so the line is one message.
+    stream.write(json.dumps(payload).encode("utf-8") + b"\n")
     stream.flush()

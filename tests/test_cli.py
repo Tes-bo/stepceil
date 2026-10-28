@@ -1,4 +1,5 @@
 import _path  # noqa: F401
+import io
 import json
 import os
 import subprocess
@@ -29,19 +30,12 @@ def run_cli(*args):
 
 
 def frame(payload):
-    body = json.dumps(payload).encode()
-    return f"Content-Length: {len(body)}\r\n\r\n".encode() + body
+    """One MCP stdio message: a JSON line."""
+    return json.dumps(payload).encode() + b"\n"
 
 
 def frames(blob):
-    parsed = []
-    rest = blob
-    while rest:
-        head, rest = rest.split(b"\r\n\r\n", 1)
-        length = int(head.split(b":", 1)[1].strip())
-        parsed.append(json.loads(rest[:length].decode()))
-        rest = rest[length:]
-    return parsed
+    return [json.loads(line) for line in blob.splitlines() if line.strip()]
 
 
 class CliTest(unittest.TestCase):
@@ -132,7 +126,7 @@ class CliTest(unittest.TestCase):
             })
             stdout = tempfile.TemporaryFile()
             try:
-                code = serve(stdin=_Bytes(incoming), stdout=stdout)
+                code = serve(stdin=io.BytesIO(incoming), stdout=stdout)
                 stdout.seek(0)
                 messages = frames(stdout.read())
             finally:
@@ -156,13 +150,69 @@ class CliTest(unittest.TestCase):
         })
         stdout = tempfile.TemporaryFile()
         try:
-            serve(stdin=_Bytes(incoming), stdout=stdout)
+            serve(stdin=io.BytesIO(incoming), stdout=stdout)
             stdout.seek(0)
             message = frames(stdout.read())[0]
         finally:
             stdout.close()
         self.assertTrue(message["result"]["isError"])
         self.assertIn("no such file", message["result"]["content"][0]["text"])
+
+    def test_mcp_is_one_json_message_per_line(self):
+        incoming = (
+            b'{"jsonrpc":"2.0","id":1,"method":"initialize",'
+            b'"params":{"protocolVersion":"2099-01-01"}}\n'
+            b"\n"
+            b"{not json\n"
+            b'{"jsonrpc":"2.0","method":"notifications/unknown"}\n'
+            b'{"jsonrpc":"2.0","id":2,"method":"tools/call",'
+            b'"params":{"name":"nope","arguments":{}}}\n'
+            b'{"jsonrpc":"2.0","id":3,"method":"tools/call",'
+            b'"params":{"name":"step_ranges","arguments":[]}}\n'
+            b'{"jsonrpc":"2.0","id":4,"method":"ping"}\n'
+        )
+        stdout = io.BytesIO()
+        self.assertEqual(serve(stdin=io.BytesIO(incoming), stdout=stdout), 0)
+        lines = stdout.getvalue().split(b"\n")
+        self.assertEqual(lines[-1], b"")
+        messages = [json.loads(line) for line in lines[:-1]]
+        self.assertEqual([message.get("id") for message in messages], [1, None, 2, 3, 4])
+        self.assertEqual(messages[0]["result"]["protocolVersion"], "2025-11-25")
+        self.assertEqual(messages[1]["error"]["code"], -32700)
+        self.assertEqual(messages[2]["error"]["code"], -32602)
+        self.assertTrue(messages[3]["result"]["isError"])
+        self.assertEqual(messages[4]["result"], {})
+
+    def test_mcp_answers_over_a_pipe_before_stdin_closes(self):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(SRC)
+        process = subprocess.Popen(
+            [sys.executable, "-m", "stepceil", "mcp"],
+            cwd=ROOT,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+        try:
+            process.stdin.write(frame({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "step_ceiling",
+                    "arguments": {"path": "examples/sync.sqlite", "range": "step"},
+                },
+            }))
+            process.stdin.flush()
+            reply = json.loads(process.stdout.readline())
+        finally:
+            process.stdin.close()
+            code = process.wait(timeout=10)
+            process.stdout.close()
+        self.assertEqual(code, 0)
+        self.assertFalse(reply["result"]["isError"])
+        ledger = json.loads(reply["result"]["content"][0]["text"])
+        self.assertEqual(ledger["decision"], "change context synchronize first")
 
     def test_diff_is_faster_only_when_the_step_shrinks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -264,7 +314,7 @@ class CliTest(unittest.TestCase):
             })
             stdout = tempfile.TemporaryFile()
             try:
-                serve(stdin=_Bytes(incoming), stdout=stdout)
+                serve(stdin=io.BytesIO(incoming), stdout=stdout)
                 stdout.seek(0)
                 message = frames(stdout.read())[0]
             finally:
@@ -274,23 +324,6 @@ class CliTest(unittest.TestCase):
                 json.loads(message["result"]["content"][0]["text"]),
                 report,
             )
-
-
-class _Bytes:
-    def __init__(self, blob):
-        self._blob = blob
-        self._at = 0
-
-    def read(self, count):
-        piece = self._blob[self._at:self._at + count]
-        self._at += len(piece)
-        return piece
-
-    def write(self, blob):
-        raise AssertionError("stdin is not written")
-
-    def flush(self):
-        return None
 
 
 if __name__ == "__main__":
