@@ -62,3 +62,5 @@ class StepWindow:
     nvtx_ops: tuple[NvtxOp, ...] = ()
     # Process that pushed the step range, in globalPid form.
     process_id: int | None = None
+    # Which closed occurrence of the range name this is, counting from 1.
+    occurrence: int = 1

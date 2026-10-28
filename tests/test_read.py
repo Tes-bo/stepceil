@@ -514,6 +514,92 @@ class ReadTest(unittest.TestCase):
             with self.assertRaisesRegex(StepceilError, "no start timestamp"):
                 load_path(path, "step")
 
+    def test_occurrence_picks_one_closed_range_by_start(self):
+        ranges = [
+            {"text": "step", "start": 200, "end": 300},
+            {"text": "step", "start": 50, "end": None},
+            {"text": "step", "start": 0, "end": 100},
+            {"text": "step", "start": 100, "end": 200},
+            {"text": "step", "start": 150, "end": 150},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            forward = Path(tmp) / "forward.sqlite"
+            backward = Path(tmp) / "backward.sqlite"
+            write_export(forward, ranges)
+            write_export(backward, list(reversed(ranges)))
+            for path in (forward, backward):
+                windows = [load_path(path, "step", n) for n in (1, 2, 3)]
+                self.assertEqual(
+                    [(w.start_ns, w.end_ns, w.occurrence) for w in windows],
+                    [(0, 100, 1), (100, 200, 2), (200, 300, 3)],
+                )
+                with self.assertRaisesRegex(StepceilError, "found 5; choose one"):
+                    load_path(path, "step")
+                with self.assertRaisesRegex(
+                    StepceilError, "has 3 closed occurrences; occurrence 4",
+                ):
+                    load_path(path, "step", 4)
+                for bad in (0, -1, True, 1.0, "2"):
+                    with self.assertRaisesRegex(StepceilError, "at least 1"):
+                        load_path(path, "step", bad)
+            self.assertEqual(account(load_path(forward, "step", 2))["occurrence"], 2)
+
+            single = Path(tmp) / "single.sqlite"
+            write_export(single, [{"text": "step", "start": 0, "end": 10}])
+            self.assertEqual(load_path(single, "step").occurrence, 1)
+            self.assertEqual(
+                account(load_path(single, "step", 1)),
+                account(load_path(single, "step")),
+            )
+
+    def test_other_occurrences_are_not_blockers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(path, [
+                {"text": "step", "start": 0, "end": 100},
+                {"text": "step", "start": 60, "end": 200, "event_type": 60},
+                {"text": "phase", "start": 10, "end": 40},
+            ])
+            loaded = load_path(path, "step", 1)
+            self.assertEqual([op.name for op in loaded.nvtx_ops], ["phase"])
+            ledger = account(loaded)
+            self.assertEqual(ledger["longest_blocker"]["kind"], "gap")
+            self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 60)
+
+    def test_diff_keeps_one_occurrence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "loop.sqlite"
+            write_export(path, [
+                {"text": "step", "start": 0, "end": 100},
+                {"text": "step", "start": 100, "end": 150},
+            ])
+            first = account(load_path(path, "step", 1))
+            second = account(load_path(path, "step", 2))
+            report = compare_ledgers(first, first)
+            self.assertEqual(report["occurrence"], 1)
+            with self.assertRaisesRegex(StepceilError, "occurrences differ: 1 and 2"):
+                compare_ledgers(first, second)
+
+    def test_readme_loop_accounts_a_later_occurrence(self):
+        readme = (ROOT / "README.md").read_text()
+        loop = ROOT / "examples" / "loop.sqlite"
+        listed = list_ranges(loop)["ranges"]
+        self.assertEqual([(r["name"], r["count"], r["closed"]) for r in listed], [
+            ("step", 3, 3),
+        ])
+        decisions = [
+            account(load_path(loop, "step", n))["decision"] for n in (1, 2, 3)
+        ]
+        self.assertEqual(decisions, [
+            "change cudaMalloc_v3020 first",
+            "rewrite pressure",
+            "rewrite pressure",
+        ])
+        second = render_text(account(load_path(loop, "step", 2)))
+        excerpt = readme.split("--occurrence 2\n```\n\n```text\n", 1)[1]
+        excerpt = excerpt.split("```", 1)[0]
+        self.assertTrue(second.startswith(excerpt), excerpt)
+
     def test_readme_examples_are_the_exports_in_the_repository(self):
         readme = (ROOT / "README.md").read_text()
         examples = ROOT / "examples"

@@ -4,7 +4,10 @@ import sqlite3
 from pathlib import Path
 
 
-def write_export(path, ranges, kernels=(), copies=(), memsets=(), syncs=()):
+def write_export(
+    path, ranges, kernels=(), copies=(), memsets=(), syncs=(), runtime=(),
+):
+    """runtime rows are host API calls. That table is written only when given."""
     path = Path(path)
     connection = sqlite3.connect(path)
     try:
@@ -164,6 +167,26 @@ def write_export(path, ranges, kernels=(), copies=(), memsets=(), syncs=()):
                 VALUES (?, ?, ?)
                 """,
                 (item["start"], item["end"], item["sync_type"]),
+            )
+        if runtime:
+            connection.execute(
+                """
+                CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (
+                    start INTEGER,
+                    end INTEGER,
+                    correlationId INTEGER,
+                    nameId INTEGER
+                )
+                """
+            )
+        for index, item in enumerate(runtime, start=1):
+            connection.execute(
+                """
+                INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME
+                    (start, end, correlationId, nameId)
+                VALUES (?, ?, ?, ?)
+                """,
+                (item["start"], item["end"], index, intern(item["name"])),
             )
         connection.commit()
     finally:

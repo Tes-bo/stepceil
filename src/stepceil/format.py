@@ -21,6 +21,7 @@ def render_json(ledger):
 def render_diff_text(report):
     lines = [
         f"range: {report['range']}",
+        f"occurrence: {report['occurrence']}",
         f"before_step_time_ns: {report['before_step_time_ns']}",
         f"after_step_time_ns: {report['after_step_time_ns']}",
         f"step_time_ns_delta: {report['step_time_ns_delta']}",
@@ -93,6 +94,7 @@ def _repeated_lines(repeated):
 def render_text(ledger):
     lines = [
         f"range: {ledger['range']}",
+        f"occurrence: {ledger['occurrence']}",
         f"step_start_ns: {ledger['step_start_ns']}",
         f"step_end_ns: {ledger['step_end_ns']}",
         f"step_time_ns: {ledger['step_time_ns']}",

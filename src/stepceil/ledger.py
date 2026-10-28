@@ -671,6 +671,7 @@ def _ledger(
     """The ledger dict. A refused step leaves every accounting field null."""
     return {
         "range": window.name,
+        "occurrence": window.occurrence,
         "step_start_ns": window.start_ns,
         "step_end_ns": window.end_ns,
         "step_time_ns": window.end_ns - window.start_ns,

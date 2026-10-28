@@ -74,11 +74,23 @@ class _Call(NamedTuple):
     correlation_id: int | None
 
 
-def load_path(path, range_name):
+def load_path(path, range_name, occurrence=None):
+    """The step window of one NVTX range.
+
+    Without occurrence the name must occur once. With occurrence N, the
+    step is the Nth closed occurrence of that name, ordered by start time,
+    counting from 1. That is the `closed` count of list_ranges.
+    """
     if range_name == "":
         raise StepceilError("empty range name")
+    if occurrence is not None and (
+        isinstance(occurrence, bool)
+        or not isinstance(occurrence, int)
+        or occurrence < 1
+    ):
+        raise StepceilError("occurrence must be an integer of at least 1")
     with closing(_open(path)) as connection:
-        return _load(connection, range_name)
+        return _load(connection, range_name, occurrence)
 
 
 def list_ranges(path):
@@ -128,23 +140,15 @@ def _open(path):
     return connection
 
 
-def _load(connection, range_name):
+def _load(connection, range_name, occurrence):
     strings = _Strings(connection)
     events = _nvtx_events(connection, strings)
     matches = [event for event in events if event.name == range_name]
-    if len(matches) != 1:
-        raise StepceilError(
-            f"expected one NVTX range named {range_name!r}, found {len(matches)}"
-        )
-    step = matches[0]
-    if step.start is None:
-        raise StepceilError(f"NVTX range {range_name!r} has no start timestamp")
-    if step.end is None:
-        raise StepceilError(f"NVTX range {range_name!r} has no end timestamp")
-    if step.end <= step.start:
-        raise StepceilError(
-            f"NVTX range {range_name!r} ends at or before it starts"
-        )
+    if occurrence is None:
+        step = _only_match(range_name, matches)
+        occurrence = 1
+    else:
+        step = _nth_closed(range_name, matches, occurrence)
     bounds = (step.start, step.end)
     calls = _runtime_calls(connection, strings, bounds)
     return StepWindow(
@@ -163,7 +167,50 @@ def _load(connection, range_name):
         ),
         nvtx_ops=tuple(_nvtx_ops(events, step)),
         process_id=step.process_id,
+        occurrence=occurrence,
     )
+
+
+def _only_match(range_name, matches):
+    if len(matches) != 1:
+        hint = "; choose one with --occurrence N" if len(matches) > 1 else ""
+        raise StepceilError(
+            f"expected one NVTX range named {range_name!r}, "
+            f"found {len(matches)}{hint}"
+        )
+    step = matches[0]
+    if step.start is None:
+        raise StepceilError(f"NVTX range {range_name!r} has no start timestamp")
+    if step.end is None:
+        raise StepceilError(f"NVTX range {range_name!r} has no end timestamp")
+    if step.end <= step.start:
+        raise StepceilError(
+            f"NVTX range {range_name!r} ends at or before it starts"
+        )
+    return step
+
+
+def _nth_closed(range_name, matches, occurrence):
+    """The Nth closed occurrence by start, then end, then process.
+
+    An open or empty occurrence is not counted, so N matches the closed
+    column of list_ranges.
+    """
+    closed = sorted(
+        (event for event in matches if _closed(event.start, event.end)),
+        key=lambda event: (
+            event.start,
+            event.end,
+            event.process_id is None,
+            event.process_id or 0,
+        ),
+    )
+    if occurrence > len(closed):
+        raise StepceilError(
+            f"NVTX range {range_name!r} has {len(closed)} closed occurrences; "
+            f"occurrence {occurrence} does not exist"
+        )
+    return closed[occurrence - 1]
 
 
 class _Strings:
@@ -240,10 +287,12 @@ def _nvtx_events(connection, strings):
 
 
 def _nvtx_ops(events, step):
-    """Ranges inside the step, other than the step itself.
+    """Ranges inside the step, other than ranges with the step's name.
 
     The step range covers every idle piece, so naming it would hide the
-    code that actually ran. An empty name is not a blocker.
+    code that actually ran. Another occurrence of the same name is an
+    earlier or later step, not code inside this one. An empty name is
+    not a blocker.
     """
     ops = []
     for event in events:
@@ -251,7 +300,7 @@ def _nvtx_ops(events, step):
             continue
         if event.end <= step.start or event.start >= step.end:
             continue
-        if event is step:
+        if event.name == step.name:
             continue
         ops.append(NvtxOp(event.name, event.start, event.end, event.process_id))
     return ops

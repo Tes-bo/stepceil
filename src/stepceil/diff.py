@@ -12,10 +12,15 @@ def compare_ledgers(before, after):
         raise StepceilError(
             f"range names differ: {before['range']!r} and {after['range']!r}"
         )
+    if before["occurrence"] != after["occurrence"]:
+        raise StepceilError(
+            f"occurrences differ: {before['occurrence']} and {after['occurrence']}"
+        )
     before_time = before["step_time_ns"]
     after_time = after["step_time_ns"]
     return {
         "range": before["range"],
+        "occurrence": before["occurrence"],
         "before_step_time_ns": before_time,
         "after_step_time_ns": after_time,
         "step_time_ns_delta": after_time - before_time,

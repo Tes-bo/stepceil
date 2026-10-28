@@ -214,6 +214,60 @@ class CliTest(unittest.TestCase):
         ledger = json.loads(reply["result"]["content"][0]["text"])
         self.assertEqual(ledger["decision"], "change context synchronize first")
 
+    def test_occurrence_on_the_command_line_and_over_mcp(self):
+        loop = "examples/loop.sqlite"
+        picked = run_cli(loop, "--range", "step", "--occurrence", "2", "--json")
+        self.assertEqual(picked.returncode, 0, picked.stderr)
+        ledger = json.loads(picked.stdout)
+        self.assertEqual(ledger["occurrence"], 2)
+        self.assertEqual(ledger["decision"], "rewrite pressure")
+
+        refused = run_cli(loop, "--range", "step")
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("found 3; choose one with --occurrence N", refused.stderr)
+        for bad in ("0", "x"):
+            invalid = run_cli(loop, "--range", "step", "--occurrence", bad)
+            self.assertEqual(invalid.returncode, 2)
+            self.assertIn("at least 1", invalid.stderr)
+
+        compared = run_cli(
+            "diff", loop, loop, "--range", "step", "--occurrence", "3", "--json",
+        )
+        self.assertEqual(compared.returncode, 0, compared.stderr)
+        self.assertEqual(json.loads(compared.stdout)["occurrence"], 3)
+
+        def call(msg_id, name, arguments):
+            return frame({
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            })
+
+        incoming = (
+            call(1, "step_ceiling", {"path": loop, "range": "step", "occurrence": 2})
+            + call(2, "step_ceiling", {"path": loop, "range": "step", "occurrence": 0})
+            + call(3, "step_diff", {
+                "before": loop, "after": loop, "range": "step", "occurrence": 1,
+            })
+        )
+        stdout = io.BytesIO()
+        cwd = os.getcwd()
+        os.chdir(ROOT)
+        try:
+            serve(stdin=io.BytesIO(incoming), stdout=stdout)
+        finally:
+            os.chdir(cwd)
+        replies = [message["result"] for message in frames(stdout.getvalue())]
+        self.assertFalse(replies[0]["isError"])
+        self.assertEqual(json.loads(replies[0]["content"][0]["text"]), ledger)
+        self.assertTrue(replies[1]["isError"])
+        self.assertIn("at least 1", replies[1]["content"][0]["text"])
+        self.assertFalse(replies[2]["isError"])
+        report = json.loads(replies[2]["content"][0]["text"])
+        self.assertEqual(report["occurrence"], 1)
+        self.assertEqual(report["before_decision"], "change cudaMalloc_v3020 first")
+
     def test_diff_is_faster_only_when_the_step_shrinks(self):
         with tempfile.TemporaryDirectory() as tmp:
             before = Path(tmp) / "before.sqlite"

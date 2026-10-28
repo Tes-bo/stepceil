@@ -50,24 +50,14 @@ def main(argv=None):
         version=f"stepceil {VERSION}",
     )
     parser.add_argument("sqlite", help="path to an nsys sqlite export")
-    parser.add_argument(
-        "--range",
-        required=True,
-        help="NVTX range name that marks the one step",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="print the ledger as JSON",
-    )
+    _step_arguments(parser)
+    _json_argument(parser, "print the ledger as JSON")
     args = parser.parse_args(argv)
     try:
-        ledger = account(load_path(Path(args.sqlite), args.range))
+        ledger = account(load_path(Path(args.sqlite), args.range, args.occurrence))
     except StepceilError as exc:
-        sys.stderr.write(f"stepceil: {exc}\n")
-        return 2
-    text = render_json(ledger) if args.json else render_text(ledger)
-    sys.stdout.write(text)
+        return _refuse(exc)
+    sys.stdout.write(render_json(ledger) if args.json else render_text(ledger))
     return 0
 
 
@@ -77,19 +67,13 @@ def _ranges(argv):
         description="List NVTX range names in an nsys sqlite export.",
     )
     parser.add_argument("sqlite", help="path to an nsys sqlite export")
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="print the range list as JSON",
-    )
+    _json_argument(parser, "print the range list as JSON")
     args = parser.parse_args(argv)
     try:
         report = list_ranges(Path(args.sqlite))
     except StepceilError as exc:
-        sys.stderr.write(f"stepceil: {exc}\n")
-        return 2
-    text = render_json(report) if args.json else render_ranges_text(report)
-    sys.stdout.write(text)
+        return _refuse(exc)
+    sys.stdout.write(render_json(report) if args.json else render_ranges_text(report))
     return 0
 
 
@@ -100,24 +84,51 @@ def _diff(argv):
     )
     parser.add_argument("before", help="nsys sqlite export from before the change")
     parser.add_argument("after", help="nsys sqlite export from after the change")
+    _step_arguments(parser)
+    _json_argument(parser, "print the comparison as JSON")
+    args = parser.parse_args(argv)
+    try:
+        before = account(load_path(Path(args.before), args.range, args.occurrence))
+        after = account(load_path(Path(args.after), args.range, args.occurrence))
+        report = compare_ledgers(before, after)
+    except StepceilError as exc:
+        return _refuse(exc)
+    sys.stdout.write(render_json(report) if args.json else render_diff_text(report))
+    return 0
+
+
+def _step_arguments(parser):
     parser.add_argument(
         "--range",
         required=True,
         help="NVTX range name that marks the one step",
     )
     parser.add_argument(
-        "--json",
-        action="store_true",
-        help="print the comparison as JSON",
+        "--occurrence",
+        type=_occurrence,
+        default=None,
+        metavar="N",
+        help=(
+            "account the Nth closed occurrence of a range name that occurs "
+            "more than once, ordered by start time, counting from 1"
+        ),
     )
-    args = parser.parse_args(argv)
+
+
+def _json_argument(parser, text):
+    parser.add_argument("--json", action="store_true", help=text)
+
+
+def _occurrence(text):
     try:
-        before = account(load_path(Path(args.before), args.range))
-        after = account(load_path(Path(args.after), args.range))
-        report = compare_ledgers(before, after)
-    except StepceilError as exc:
-        sys.stderr.write(f"stepceil: {exc}\n")
-        return 2
-    text = render_json(report) if args.json else render_diff_text(report)
-    sys.stdout.write(text)
-    return 0
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be an integer of at least 1")
+    return value
+
+
+def _refuse(exc):
+    sys.stderr.write(f"stepceil: {exc}\n")
+    return 2

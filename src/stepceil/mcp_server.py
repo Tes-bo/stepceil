@@ -52,7 +52,9 @@ TOOL = {
         "short_idle_ns is idle those pieces do not cover. "
         "short_idle_longest_ns is the longest stretch of that idle, not a "
         "call and not a decision. Do not add it to a blocker or to repeated. "
-        "More than one process in the step is an error."
+        "More than one process in the step is an error. When the range name "
+        "occurs more than once, pass occurrence. Prefer one after the first: "
+        "the first iteration usually carries one-time setup."
     ),
     "inputSchema": {
         "type": "object",
@@ -65,6 +67,15 @@ TOOL = {
                 "type": "string",
                 "description": "NVTX range name that marks the one step.",
             },
+            "occurrence": {
+                "type": "integer",
+                "minimum": 1,
+                "description": (
+                    "Nth closed occurrence of a range name that occurs more "
+                    "than once, ordered by start time, counting from 1. "
+                    "Omit it when the name occurs once."
+                ),
+            },
         },
         "required": ["path", "range"],
         "additionalProperties": False,
@@ -75,7 +86,9 @@ RANGES_TOOL = {
     "name": "step_ranges",
     "description": (
         "List NVTX range names in an nsys sqlite export. Account a name "
-        "only when count is 1 and closed is 1. shortest_ns and longest_ns "
+        "when count is 1 and closed is 1. A name that marks every iteration "
+        "is accounted with occurrence, from 1 to closed. "
+        "shortest_ns and longest_ns "
         "are the closed occurrences. They do not choose a window. Do not "
         "guess a range name or replace a missing range with a start and "
         "end time."
@@ -96,7 +109,8 @@ RANGES_TOOL = {
 DIFF_TOOL = {
     "name": "step_diff",
     "description": (
-        "Compare two nsys sqlite exports of the same NVTX range. "
+        "Compare two nsys sqlite exports of the same NVTX range and "
+        "occurrence. "
         "faster is true only when the later step is strictly shorter. "
         "Do not claim a speedup unless faster is true."
     ),
@@ -114,6 +128,15 @@ DIFF_TOOL = {
             "range": {
                 "type": "string",
                 "description": "NVTX range name that marks the one step.",
+            },
+            "occurrence": {
+                "type": "integer",
+                "minimum": 1,
+                "description": (
+                    "Nth closed occurrence of a range name that occurs more "
+                    "than once, ordered by start time, counting from 1. "
+                    "The same N is used for both exports."
+                ),
             },
         },
         "required": ["before", "after", "range"],
@@ -202,7 +225,9 @@ def _ceiling_call(msg_id, arguments):
     if not isinstance(path, str) or not isinstance(range_name, str):
         return _tool_result(msg_id, "path and range must be strings", True)
     try:
-        ledger = account(load_path(Path(path), range_name))
+        ledger = account(load_path(
+            Path(path), range_name, arguments.get("occurrence"),
+        ))
     except StepceilError as exc:
         return _tool_result(msg_id, str(exc), True)
     return _tool_result(msg_id, render_json(ledger), False)
@@ -232,9 +257,10 @@ def _diff_call(msg_id, arguments):
             msg_id, "before, after, and range must be strings", True
         )
     try:
+        occurrence = arguments.get("occurrence")
         report = compare_ledgers(
-            account(load_path(Path(before), range_name)),
-            account(load_path(Path(after), range_name)),
+            account(load_path(Path(before), range_name, occurrence)),
+            account(load_path(Path(after), range_name, occurrence)),
         )
     except StepceilError as exc:
         return _tool_result(msg_id, str(exc), True)

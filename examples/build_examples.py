@@ -15,7 +15,11 @@ from support import write_export  # noqa: E402
 
 def main():
     out = Path(__file__).resolve().parent
-    for name in ("sync.sqlite", "after.sqlite", "overlap.sqlite", "names.sqlite"):
+    names = (
+        "sync.sqlite", "after.sqlite", "overlap.sqlite", "names.sqlite",
+        "loop.sqlite",
+    )
+    for name in names:
         (out / name).unlink(missing_ok=True)
     write_export(
         out / "sync.sqlite",
@@ -46,6 +50,21 @@ def main():
             {"text": "inner", "start": 14, "end": 30},
             {"text": "step", "start": 0, "end": 16},
         ],
+    )
+    # Three iterations of one loop. The first allocates before it launches.
+    write_export(
+        out / "loop.sqlite",
+        [
+            {"text": "step", "start": 0, "end": 700},
+            {"text": "step", "start": 700, "end": 800},
+            {"text": "step", "start": 800, "end": 900},
+        ],
+        kernels=[
+            {"name": "pressure", "start": 600, "end": 690},
+            {"name": "pressure", "start": 700, "end": 790},
+            {"name": "pressure", "start": 800, "end": 890},
+        ],
+        runtime=[{"name": "cudaMalloc_v3020", "start": 0, "end": 600}],
     )
 
 

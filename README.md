@@ -43,11 +43,11 @@ nvtxRangePushA("step");
 nvtxRangePop();
 ```
 
-`--json` prints the ledger an agent should read. The range name must occur once. Push/pop (NVTX type 59) and start/end (type 60) count. Marks do not. The match is exact.
+`--json` prints the ledger an agent should read. The range name must occur once, unless `--occurrence N` picks one of several ([below](#a-name-that-marks-every-iteration)). Push/pop (NVTX type 59) and start/end (type 60) count. Marks do not. The match is exact.
 
 ## Which name marks the step
 
-List the names before choosing one. A name can be accounted only when `count` is 1 and `closed` is 1. `closed` is how many of those events have an end timestamp after the start. `shortest_ns` and `longest_ns` are the durations of those closed occurrences. They do not pick a window. `inner` below occurs four times, from 4 ns to 16 ns, so it is not a step.
+List the names before choosing one. A name is accounted on its own when `count` is 1 and `closed` is 1. `closed` is how many of those events have an end timestamp after the start. `shortest_ns` and `longest_ns` are the durations of those closed occurrences. They do not pick a window. `inner` below occurs four times, from 4 ns to 16 ns, so it is not a step.
 
 ```bash
 stepceil ranges examples/names.sqlite
@@ -69,6 +69,29 @@ longest_ns: 16
 
 The MCP tool `step_ranges` takes `path` and returns that list as JSON.
 
+## A name that marks every iteration
+
+A training loop usually pushes the same range on every iteration, so that name has `count` above 1 and is refused on its own. `--occurrence N` accounts the Nth closed occurrence, ordered by start time and counting from 1. N runs from 1 to `closed`. An open occurrence is not counted. The ledger records N as `occurrence`. Another occurrence of the same name is a different step, so it is never a blocker inside this one.
+
+`examples/loop.sqlite` has three iterations of `step`. In the first, `cudaMalloc_v3020` holds the GPU idle for 600 ns before `pressure` runs for 90 ns, so its decision is `change cudaMalloc_v3020 first`. That allocation happens once. The second and third last 100 ns, `pressure` takes 90 ns of each, and their decision is `rewrite pressure`. Account a later occurrence when there is one. The first iteration usually carries one-time setup: allocation, JIT compilation, autotuning.
+
+```bash
+stepceil ranges examples/loop.sqlite
+stepceil examples/loop.sqlite --range step --occurrence 2
+```
+
+```text
+range: step
+occurrence: 2
+step_start_ns: 700
+step_end_ns: 800
+step_time_ns: 100
+gpu_busy_ns: 90
+gpu_idle_ns: 10
+```
+
+`stepceil diff` takes the same `--occurrence` and applies it to both exports. The MCP tools `step_ceiling` and `step_diff` take it as `occurrence`.
+
 ## The hot kernel is not always the step
 
 `pressure` runs for the first 80 ns of a 1000 ns step. `cudaDeviceSynchronize` covers the whole step, so the other 920 ns is that synchronize sitting on idle GPU time. Deleting `pressure` saves at most 80 ns. That is under 10% of the step, so `allow_rewrite` is false. The blocking piece of the synchronize starts at 80 ns, not at the start of the call.
@@ -79,6 +102,7 @@ The MCP tool `step_ranges` takes `path` and returns that list as JSON.
 
 ```text
 range: step
+occurrence: 1
 step_start_ns: 0
 step_end_ns: 1000
 step_time_ns: 1000
@@ -152,6 +176,7 @@ decision: change context synchronize first
 ```json
 {
   "range": "step",
+  "occurrence": 1,
   "step_start_ns": 0,
   "step_end_ns": 1000,
   "step_time_ns": 1000,
@@ -211,6 +236,7 @@ decision: change context synchronize first
 
 ```text
 range: step
+occurrence: 1
 step_start_ns: 0
 step_end_ns: 100
 step_time_ns: 100
@@ -295,6 +321,7 @@ stepceil diff examples/sync.sqlite examples/after.sqlite --range step
 
 ```text
 range: step
+occurrence: 1
 before_step_time_ns: 1000
 after_step_time_ns: 200
 step_time_ns_delta: -800
@@ -325,7 +352,7 @@ before_decision: change context synchronize first
 after_decision: change context synchronize first
 ```
 
-The MCP tool `step_diff` takes `before`, `after`, and `range` and returns that same JSON.
+The MCP tool `step_diff` takes `before`, `after`, `range`, and an optional `occurrence`, and returns that same JSON.
 
 ## What the numbers mean
 
@@ -336,7 +363,7 @@ When nothing on the device overlaps:
 - Each clipped launch blocks the step for its own duration.
 - The ceiling of a kernel name is the sum of its clipped launches, not the longest one.
 - A synchronization call blocks the step only where it covers idle time. Time already covered by a kernel, copy, or memset stays on that operation. Another synchronization that overlaps the same idle does not shorten that piece. The longest blocker is the longest piece, not the sum of the pieces. When several calls cover that same piece, the narrowest call is the blocker. A wider range that only wraps it is not a longer blocker. `contained` is the longest operation strictly inside that piece. It is not a second decision. An equal span is the same piece, not something inside it. `contained.contained` opens that result once more, then stops. `separate` is the longest piece that does not meet the blocker. Touching endpoints do not meet. It is not a second decision. `further` lists each later piece that does not meet those already listed and that lasts at least a tenth of the step, the same bar as `allow_rewrite`. A shorter piece is left off. `further` is not a decision either. `repeated` lists a host API, and an NVTX range whose every idle piece is shorter than a tenth of the step, when at least two calls together last that long. A single call is not repeated, even when a kernel splits it. A range that already has one idle piece that long is not listed again. A range whose idle sits inside another listed range is left off. When two ranges cover the same idle, the narrower source span remains. Do not add `idle_ns` to a blocker, do not add two `repeated` entries together, and do not read `idle_ns` as the blocking time of one call. `short_idle_ns` is idle that the blocker, `separate`, and `further` do not cover. `short_idle_longest_ns` is the longest contiguous stretch of that idle. Several calls can tile one stretch, so the stretch is not a call and not a blocker. Do not add `short_idle_ns` to a blocker or to a `repeated` entry.
-- Idle time with no synchronization call, no host API call, and no other NVTX range is a gap named `gpu idle`. A `CUPTI_ACTIVITY_KIND_RUNTIME` call and any NVTX range other than the step itself block only the idle they cover, under their own names. Neither is device work, so neither changes `gpu_busy_ns` or overlaps a kernel. The step range is not a blocker: it covers the whole window. A call or range from another process is not this step's blocker.
+- Idle time with no synchronization call, no host API call, and no other NVTX range is a gap named `gpu idle`. A `CUPTI_ACTIVITY_KIND_RUNTIME` call and any NVTX range other than the step itself block only the idle they cover, under their own names. Neither is device work, so neither changes `gpu_busy_ns` or overlaps a kernel. No range with the step's name is a blocker. The step covers the whole window, and another occurrence of that name is another step. A call or range from another process is not this step's blocker.
 
 `allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
 
@@ -376,7 +403,7 @@ More than one process inside the step exits 2 and prints no ledger. Nsight store
 
 ## MCP
 
-`stepceil mcp` speaks [MCP](https://modelcontextprotocol.io) on stdin and stdout. `step_ceiling` takes `path` and `range` and returns the `--json` ledger. `step_diff` compares two exports. `step_ranges` lists range names. A refused report is a tool error.
+`stepceil mcp` speaks [MCP](https://modelcontextprotocol.io) on stdin and stdout. `step_ceiling` takes `path`, `range`, and an optional `occurrence`, and returns the `--json` ledger. `step_diff` compares two exports. `step_ranges` lists range names. A refused report is a tool error.
 
 ```json
 {

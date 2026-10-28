@@ -18,7 +18,7 @@ If the range name is not already known, list the names in the export first. Do n
 stepceil ranges REPORT.sqlite --json
 ```
 
-`step_ranges` is that list when MCP is connected. Pass `path`. Account a name only when `count` is 1 and `closed` is 1. `shortest_ns` and `longest_ns` are how long the closed occurrences were. They do not choose a window. A name that occurs more than once is not a step, even when those two numbers match.
+`step_ranges` is that list when MCP is connected. Pass `path`. Account a name on its own when `count` is 1 and `closed` is 1. `shortest_ns` and `longest_ns` are how long the closed occurrences were. They do not choose a window, even when those two numbers match.
 
 ```
 stepceil REPORT.sqlite --range STEP --json
@@ -27,6 +27,8 @@ stepceil REPORT.sqlite --range STEP --json
 `STEP` is that NVTX range name. `REPORT.sqlite` is the file from `nsys export --type sqlite`, not a `.nsys-rep`.
 
 If the `step_ceiling` MCP tool is connected, call it with `path` and `range`. It returns this same JSON.
+
+When the name marks every iteration, `count` is above 1. Add `--occurrence N`, or `occurrence` over MCP, with N from 1 to `closed`. N counts closed occurrences by start time. Choose N after the first when `closed` is above 1: the first iteration usually carries one-time setup such as allocation, JIT compilation, or autotuning. Do not account several occurrences and add or average their numbers. The ledger's `occurrence` is the one that was accounted.
 
 Obey `decision`. Do not derive a different action from `allow_rewrite`.
 
@@ -39,7 +41,7 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 - When the blocker is a copy or memset, `longest_blocker.bytes` is its size from the export only if that transfer lies entirely inside the step. Null means the export did not say, or the transfer crosses the boundary. Do not invent a size.
 - A synchronization's blocking time is the idle that call covers. Another synchronization on the same idle does not shorten it. A kernel, copy, or memset still splits it. Do not add the pieces. When several calls cover that same piece, the narrowest call is the blocker. Do not change a wider range that only wraps it.
 - When the blocker kind is `runtime`, that host API call is what to change. It is not GPU work.
-- When the blocker kind is `nvtx`, that range is the code to change. It is not GPU work. The step's own range is not a blocker. `gpu idle` means no synchronization, no host API call, and no other NVTX range covers that piece.
+- When the blocker kind is `nvtx`, that range is the code to change. It is not GPU work. No range with the step's name is a blocker, including another occurrence of it. `gpu idle` means no synchronization, no host API call, and no other NVTX range covers that piece.
 - `contained` is the longest operation strictly inside the blocker. It is not a second decision. That is where the blocker's time went. `contained.contained` is the longest operation strictly inside that one, and the ledger stops there. Do not rewrite a kernel from either of them. Null means nothing shorter sits inside that piece.
 - `separate` is the longest piece that does not meet the blocker. Touching endpoints do not meet. It is not a second decision. Finish `decision` before changing it.
 - `further` lists each later piece that does not meet the blocker or a piece already listed, and that lasts at least a tenth of the step. A shorter piece is left off. It is not a decision. Do not start on it before `decision`.
@@ -51,4 +53,4 @@ Obey `decision`. Do not derive a different action from `allow_rewrite`.
 stepceil diff BEFORE.sqlite AFTER.sqlite --range STEP --json
 ```
 
-`step_diff` is the same comparison when MCP is connected. Pass `before`, `after`, and `range`.
+`step_diff` is the same comparison when MCP is connected. Pass `before`, `after`, and `range`. Pass the same `--occurrence N`, or `occurrence`, that the ledger used. It applies to both exports.
