@@ -442,6 +442,8 @@ python3 examples/build_examples.py
 python3 -m unittest discover -s tests -v
 ```
 
+The files in `examples/` are synthetic. `tests/data/nsys-2024.6-loop.sqlite` is one real capture of `tests/data/loop.cu` from Nsight Systems 2024.6, cut down by `tests/data/trim_export.py` to the tables stepceil reads and the strings they reference.
+
 ## License
 
 [MIT](LICENSE).
