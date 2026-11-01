@@ -578,22 +578,25 @@ def _subtract(spans, cut):
 
 
 def _repeated(runtime_pieces, nvtx_pieces, step_time):
-    """Host APIs, and ranges that never form one long idle piece.
+    """Host APIs and ranges whose idle comes only in short pieces.
 
-    One call, even when a kernel splits it, is not repeated. A range that
-    already has an idle piece as long as a tenth of the step is not listed
-    again: that piece is already named. A range whose idle lies inside
-    another listed range is the same time, so it is left off. When two
-    ranges cover the same idle, the narrower source span remains. The union
-    is not a blocker's time, and two entries are not one total.
+    The same rule holds for both. A name with an idle piece as long as a
+    tenth of the step already has a piece-sized cost, which the blocker,
+    separate, or further report, so it is not listed here. That is the
+    case of one long call plus a short one. Otherwise the pieces must come
+    from at least two calls and last a tenth of the step together. One
+    call, even when a kernel splits it, is not repeated. A range whose idle
+    lies inside another listed range is the same time, so it is left off.
+    When two ranges cover the same idle, the narrower source span remains.
+    The union is not a blocker's time, and two entries are not one total.
     """
-    found = _repeated_kind(runtime_pieces, "runtime", step_time, short=False)
-    found.extend(_repeated_kind(nvtx_pieces, "nvtx", step_time, short=True))
+    found = _repeated_kind(runtime_pieces, "runtime", step_time, nested=False)
+    found.extend(_repeated_kind(nvtx_pieces, "nvtx", step_time, nested=True))
     found.sort(key=lambda item: (-item["idle_ns"], item["name"], item["kind"]))
     return found
 
 
-def _repeated_kind(pieces, kind, step_time, short):
+def _repeated_kind(pieces, kind, step_time, nested):
     grouped = {}
     for start, end, call in pieces:
         spans, calls = grouped.setdefault(call.name, ([], {}))
@@ -603,12 +606,11 @@ def _repeated_kind(pieces, kind, step_time, short):
     for name, (spans, calls) in grouped.items():
         if len(calls) < 2:
             continue
+        if any(_allows_rewrite(end - start, step_time) for start, end in spans):
+            continue
         merged = merge(spans)
         idle = length(merged)
         if not _allows_rewrite(idle, step_time):
-            continue
-        longest_piece = max(end - start for start, end in spans)
-        if short and _allows_rewrite(longest_piece, step_time):
             continue
         qualifying.append({
             "kind": kind,
@@ -620,7 +622,7 @@ def _repeated_kind(pieces, kind, step_time, short):
                 call.end_ns - call.start_ns for call in calls.values()
             ),
         })
-    if short:
+    if nested:
         qualifying = [
             item for item in qualifying
             if not any(

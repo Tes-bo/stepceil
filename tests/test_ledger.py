@@ -515,8 +515,8 @@ class LedgerTest(unittest.TestCase):
 
     def test_repeated_is_many_calls_of_one_api(self):
         launches = [
-            RuntimeOp("cudaLaunchKernel_v7000", start, start + 10)
-            for start in (0, 20, 40, 60)
+            RuntimeOp("cudaLaunchKernel_v7000", start, start + 8)
+            for start in (0, 16, 32, 48, 64)
         ]
         ledger = account(window(
             0, 100,
@@ -530,8 +530,22 @@ class LedgerTest(unittest.TestCase):
             "kind": "runtime",
             "name": "cudaLaunchKernel_v7000",
             "idle_ns": 40,
-            "calls": 4,
+            "calls": 5,
         }])
+
+        # One long cudaMalloc and one short one, as in a real first
+        # iteration. The long one is a piece. The pair is not repeated.
+        setup = account(window(
+            0, 100,
+            [kernel("pressure", 95, 100)],
+            runtime=[
+                RuntimeOp("cudaMalloc_v3020", 10, 60),
+                RuntimeOp("cudaMalloc_v3020", 61, 64),
+            ],
+        ))
+        self.assertEqual(setup["longest_blocker"]["name"], "cudaMalloc_v3020")
+        self.assertEqual(setup["longest_blocker"]["blocking_ns"], 50)
+        self.assertEqual(setup["repeated"], [])
 
         split = account(window(
             0, 100,
