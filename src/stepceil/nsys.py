@@ -152,14 +152,15 @@ def _load(connection, range_name, occurrence):
     bounds = (step.start, step.end)
     calls = _runtime_calls(connection, strings, bounds)
     syncs, merged = _syncs(connection, bounds, calls)
+    launches = _by_correlation(calls)
     return StepWindow(
         name=range_name,
         start_ns=step.start,
         end_ns=step.end,
         device_ops=(
-            *_kernels(connection, strings, bounds),
-            *_memcpys(connection, bounds),
-            *_memsets(connection, bounds),
+            *_kernels(connection, strings, bounds, launches),
+            *_memcpys(connection, bounds, launches),
+            *_memsets(connection, bounds, launches),
         ),
         syncs=tuple(syncs),
         runtime_ops=tuple(
@@ -312,7 +313,7 @@ def _closed(start, end):
     return start is not None and end is not None and end > start
 
 
-def _kernels(connection, strings, bounds):
+def _kernels(connection, strings, bounds, launches):
     if not _has_table(connection, KERNEL_TABLE):
         return []
     columns = _columns(connection, KERNEL_TABLE)
@@ -324,7 +325,7 @@ def _kernels(connection, strings, bounds):
     return [
         _device_op(
             "kernel", KERNEL_TABLE, _kernel_name(row, name_columns, strings), row,
-            symbol=_kernel_symbol(row, name_columns, strings),
+            launches, symbol=_kernel_symbol(row, name_columns, strings),
         )
         for row in rows
     ]
@@ -353,7 +354,7 @@ def _kernel_symbol(row, name_columns, strings):
     return None
 
 
-def _memcpys(connection, bounds):
+def _memcpys(connection, bounds, launches):
     if not _has_table(connection, MEMCPY_TABLE):
         return []
     columns = _columns(connection, MEMCPY_TABLE)
@@ -370,12 +371,13 @@ def _memcpys(connection, bounds):
         else:
             name = "memcpy"
         ops.append(_device_op(
-            "memcpy", MEMCPY_TABLE, name, row, byte_count=_value(row, "bytes"),
+            "memcpy", MEMCPY_TABLE, name, row, launches,
+            byte_count=_value(row, "bytes"),
         ))
     return ops
 
 
-def _memsets(connection, bounds):
+def _memsets(connection, bounds, launches):
     if not _has_table(connection, MEMSET_TABLE):
         return []
     columns = _columns(connection, MEMSET_TABLE)
@@ -383,7 +385,8 @@ def _memsets(connection, bounds):
     rows = _device_rows(connection, MEMSET_TABLE, columns, bounds, extra)
     return [
         _device_op(
-            "memset", MEMSET_TABLE, "memset", row, byte_count=_value(row, "bytes"),
+            "memset", MEMSET_TABLE, "memset", row, launches,
+            byte_count=_value(row, "bytes"),
         )
         for row in rows
     ]
@@ -391,7 +394,10 @@ def _memsets(connection, bounds):
 
 def _device_rows(connection, table, columns, bounds, extra):
     _require_columns(connection, table, DEVICE_COLUMNS)
-    optional = [name for name in ("contextId", "globalPid") if name in columns]
+    optional = [
+        name for name in ("contextId", "globalPid", "correlationId")
+        if name in columns
+    ]
     selected = [*DEVICE_COLUMNS, *optional, *extra]
     query = (
         f"SELECT {', '.join(selected)} FROM {table} "
@@ -400,8 +406,9 @@ def _device_rows(connection, table, columns, bounds, extra):
     return connection.execute(query, bounds).fetchall()
 
 
-def _device_op(kind, table, name, row, byte_count=None, symbol=None):
+def _device_op(kind, table, name, row, launches, byte_count=None, symbol=None):
     device_id = _required_int(row, "deviceId", table)
+    process_id = _int_or_none(_value(row, "globalPid"))
     return DeviceOp(
         kind=kind,
         name=name,
@@ -412,9 +419,38 @@ def _device_op(kind, table, name, row, byte_count=None, symbol=None):
         context_id=_int_or_none(_value(row, "contextId")),
         peer_device_ids=_peer_device_ids(row, device_id),
         byte_count=_int_or_none(byte_count),
-        process_id=_int_or_none(_value(row, "globalPid")),
+        process_id=process_id,
         symbol=symbol,
+        launch_end_ns=_launch_end(
+            launches, _int_or_none(_value(row, "correlationId")), process_id,
+        ),
     )
+
+
+def _by_correlation(calls):
+    found = {}
+    for call in calls:
+        if call.correlation_id is not None:
+            found.setdefault(call.correlation_id, []).append(call)
+    return found
+
+
+def _launch_end(launches, correlation_id, process_id):
+    """End of the one runtime call that launched a device operation, or None.
+
+    The call has the operation's correlation id. Correlation ids are reused
+    across processes, so a call from another process does not count when
+    both sides name one. Two candidates, or none, give None.
+    """
+    found = [
+        call for call in launches.get(correlation_id, ())
+        if process_id is None
+        or call.process_id is None
+        or call.process_id == process_id
+    ]
+    if len(found) != 1:
+        return None
+    return found[0].end
 
 
 def _peer_device_ids(row, device_id):

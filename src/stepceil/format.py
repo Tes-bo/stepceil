@@ -100,6 +100,7 @@ def render_text(ledger):
         f"step_time_ns: {ledger['step_time_ns']}",
         f"gpu_busy_ns: {ledger['gpu_busy_ns']}",
         f"gpu_idle_ns: {ledger['gpu_idle_ns']}",
+        f"queued_idle_ns: {ledger['queued_idle_ns']}",
         f"assumption: {ledger['assumption']}",
     ]
     lines.extend(_object_lines(

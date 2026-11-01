@@ -92,6 +92,24 @@ gpu_idle_ns: 10
 
 `stepceil diff` takes the same `--occurrence` and applies it to both exports. The MCP tools `step_ceiling` and `step_diff` take it as `occurrence`.
 
+## A shared GPU is not a synchronize
+
+`tests/data/nsys-2024.6-loop.sqlite` is a real capture on a Tesla V100 that other processes were using at the same time. In its second iteration, `cudaLaunchKernel` returns 8,590 ns into the 3,999,049 ns step, and `pressure` starts at 3,423,384 ns. `cudaDeviceSynchronize` covers that whole wait, but the work had already been submitted, so changing the synchronize would not start it sooner. The wait is the GPU queue: a 3,414,794 ns `gpu queue` piece is the longest blocker, and `queued_idle_ns` is 3,415,498.
+
+```bash
+stepceil tests/data/nsys-2024.6-loop.sqlite --range step --occurrence 2
+```
+
+```text
+gpu_idle_ns: 3426318
+queued_idle_ns: 3415498
+assumption: single stream, no overlapping device work
+longest_blocker.kind: queue
+longest_blocker.name: gpu queue
+```
+
+A `queue` blocker makes the decision `do not rewrite a kernel from this report`. The export does not say what held the GPU, and whatever did may also have stretched the kernel times. Capture again on a GPU no other process is using.
+
 ## The hot kernel is not always the step
 
 `pressure` runs for the first 80 ns of a 1000 ns step. `cudaDeviceSynchronize` covers the whole step, so the other 920 ns is that synchronize sitting on idle GPU time. Deleting `pressure` saves at most 80 ns. That is under 10% of the step, so `allow_rewrite` is false. The blocking piece of the synchronize starts at 80 ns, not at the start of the call.
@@ -108,6 +126,7 @@ step_end_ns: 1000
 step_time_ns: 1000
 gpu_busy_ns: 80
 gpu_idle_ns: 920
+queued_idle_ns: 0
 assumption: single stream, no overlapping device work
 longest_blocker.kind: sync
 longest_blocker.name: context synchronize
@@ -182,6 +201,7 @@ decision: change context synchronize first
   "step_time_ns": 1000,
   "gpu_busy_ns": 80,
   "gpu_idle_ns": 920,
+  "queued_idle_ns": 0,
   "assumption": "single stream, no overlapping device work",
   "longest_blocker": {
     "kind": "sync",
@@ -242,6 +262,7 @@ step_end_ns: 100
 step_time_ns: 100
 gpu_busy_ns: 100
 gpu_idle_ns: 0
+queued_idle_ns: 0
 assumption: overlapping device work on more than one stream
 longest_blocker.kind: none
 longest_blocker.name: none
@@ -364,8 +385,9 @@ When nothing on the device overlaps:
 - The ceiling of a kernel name is the sum of its clipped launches, not the longest one.
 - A synchronization call blocks the step only where it covers idle time. Time already covered by a kernel, copy, or memset stays on that operation. Another synchronization that overlaps the same idle does not shorten that piece. The longest blocker is the longest piece, not the sum of the pieces. When several calls cover that same piece, the narrowest call is the blocker. A wider range that only wraps it is not a longer blocker. `contained` is the longest operation strictly inside that piece. It is not a second decision. An equal span is the same piece, not something inside it. `contained.contained` opens that result once more, then stops. `separate` is the longest piece that does not meet the blocker. Touching endpoints do not meet. It is not a second decision. `further` lists each later piece that does not meet those already listed and that lasts at least a tenth of the step, the same bar as `allow_rewrite`. A shorter piece is left off. `further` is not a decision either. `repeated` lists a host API or an NVTX range whose every idle piece is shorter than a tenth of the step, when at least two of its calls together last that long. The same rule holds for both. A single call is not repeated, even when a kernel splits it. A name that already has one idle piece that long is not listed again, even beside a short call: that piece is reported as a piece of its own. A range whose idle sits inside another listed range is left off. When two ranges cover the same idle, the narrower source span remains. Do not add `idle_ns` to a blocker, do not add two `repeated` entries together, and do not read `idle_ns` as the blocking time of one call. `short_idle_ns` is idle that the blocker, `separate`, and `further` do not cover. `short_idle_longest_ns` is the longest contiguous stretch of that idle. Several calls can tile one stretch, so the stretch is not a call and not a blocker. Do not add `short_idle_ns` to a blocker or to a `repeated` entry.
 - Idle time with no synchronization call, no host API call, and no other NVTX range is a gap named `gpu idle`. A `CUPTI_ACTIVITY_KIND_RUNTIME` call and any NVTX range other than the step itself block only the idle they cover, under their own names. Neither is device work, so neither changes `gpu_busy_ns` or overlaps a kernel. No range with the step's name is a blocker. The step covers the whole window, and another occurrence of that name is another step. A call or range from another process is not this step's blocker.
+- Some idle is queued. When a kernel, copy, or memset has a `correlationId`, and the one runtime call with that id in the same process meets the step, the time from that call's end to the operation's start is the operation's wait. Idle inside a wait is a piece of kind `queue` named `gpu queue`: the step had submitted work the GPU had not started. No synchronization, host call, or range is charged for it. `queued_idle_ns` is all of that idle, including pieces too short to be named, and it is reported even when the ceiling is withheld. A call that returns after its operation ends, such as a synchronous `cudaMemcpy`, leaves no wait. Work launched before the step began has no launch call in the step, so its wait is not counted.
 
-`allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap.
+`allow_rewrite` is true only when `ceiling_ns * 10 >= step_time_ns`. The threshold is fixed at 1/10 of the step and is repeated in the ledger. `decision` is the action. Rewrite a kernel only when it says `rewrite` and that kernel's name. `allow_rewrite` can be true while `decision` still says to change a synchronize or a gap. A `queue` blocker makes the decision `do not rewrite a kernel from this report`.
 
 Overlap on different streams, or different CUDA contexts, is reported as more than one stream. Overlap on one stream is reported separately, because a single stream should not do that. `overlap` names the clipped pair of that class with the longest overlap. `overlap.overlap_ns` is that intersection. Ties keep the earlier one. The pair does not follow the order of rows in the export. A cross-stream pair is kept when both kinds of overlap are present, even when a same-stream overlap is longer. Adding the two durations is not a ceiling. Intervals are half-open: a launch that ends at the timestamp another starts does not overlap it.
 

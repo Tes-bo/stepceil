@@ -394,6 +394,52 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 30)
         self.assertEqual(ledger["decision"], "change reduce first")
 
+    def test_submitted_work_waiting_is_the_gpu_queue(self):
+        def launched(name, start, end, launch_end):
+            return DeviceOp(
+                "kernel", name, start, end, 1, 0, 1, launch_end_ns=launch_end,
+            )
+
+        sync = [SyncOp("cudaDeviceSynchronize", 5, 95)]
+        waited = account(window(0, 100, [launched("pressure", 60, 90, 10)], sync))
+        self.assertEqual(waited["queued_idle_ns"], 50)
+        self.assertEqual(waited["longest_blocker"]["kind"], "queue")
+        self.assertEqual(waited["longest_blocker"]["name"], "gpu queue")
+        self.assertEqual(waited["longest_blocker"]["start_ns"], 10)
+        self.assertEqual(waited["longest_blocker"]["end_ns"], 60)
+        self.assertIsNone(waited["contained"])
+        self.assertEqual(waited["separate"]["name"], "pressure")
+        self.assertEqual(
+            waited["decision"], "do not rewrite a kernel from this report",
+        )
+        self.assertEqual(waited["ceiling_ns"], 30)
+        self.assertEqual(waited["short_idle_ns"], 20)
+
+        unknown = account(window(0, 100, [kernel("pressure", 60, 90)], sync))
+        self.assertEqual(unknown["queued_idle_ns"], 0)
+        self.assertEqual(unknown["longest_blocker"]["kind"], "sync")
+        self.assertEqual(unknown["longest_blocker"]["blocking_ns"], 55)
+
+        # Back to back on one stream: b waits only for the moment the GPU
+        # takes to start it after a. A launch before the step adds nothing.
+        chained = account(window(0, 100, [
+            launched("a", 0, 40, -5),
+            launched("b", 42, 80, 5),
+        ]))
+        self.assertEqual(chained["queued_idle_ns"], 2)
+        self.assertEqual(chained["decision"], "rewrite a")
+
+        # A call that returns after its operation ends leaves no wait.
+        blocking = account(window(0, 100, [launched("copy", 20, 60, 70)]))
+        self.assertEqual(blocking["queued_idle_ns"], 0)
+
+        overlapped = account(window(0, 100, [
+            DeviceOp("kernel", "alpha", 30, 60, 1, 0, 1, launch_end_ns=0),
+            DeviceOp("kernel", "beta", 40, 100, 2, 0, 1),
+        ]))
+        self.assertIsNone(overlapped["ceiling_ns"])
+        self.assertEqual(overlapped["queued_idle_ns"], 30)
+
     def test_hottest_tie_uses_the_earlier_launch(self):
         ledger = account(window(0, 100, [
             kernel("alpha", 50, 90),

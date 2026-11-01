@@ -5,6 +5,8 @@ overlap. The ceiling of the hottest kernel is the sum of its clipped
 launches. Overlap withholds that ceiling. A synchronization call counts
 only on idle time; time already covered by a kernel, copy, or memset stays
 on that operation. A host API call does the same, and it is not device work.
+Idle while this step's own submitted work had not started is the GPU queue.
+No synchronization, host call, or range is charged for it.
 """
 
 from dataclasses import replace
@@ -17,7 +19,8 @@ ASSUMPTION_EXCLUSIVE = "single stream, no overlapping device work"
 ASSUMPTION_MULTI = "overlapping device work on more than one stream"
 ASSUMPTION_SAME = "device activities overlap on one stream"
 GPU_IDLE_NAME = "gpu idle"
-_IDLE_KINDS = frozenset(("sync", "runtime", "nvtx", "gap"))
+GPU_QUEUE_NAME = "gpu queue"
+_IDLE_KINDS = frozenset(("sync", "runtime", "nvtx", "queue", "gap"))
 
 KIND_RANK = {
     "kernel": 0,
@@ -26,7 +29,8 @@ KIND_RANK = {
     "sync": 3,
     "runtime": 4,
     "nvtx": 5,
-    "gap": 6,
+    "queue": 6,
+    "gap": 7,
 }
 
 
@@ -48,24 +52,29 @@ def account(window):
     busy_spans = merge((op.start_ns, op.end_ns) for op in clipped)
     busy = length(busy_spans)
     idle = step_time - busy
+    holes = complement(busy_spans, window.start_ns, window.end_ns)
+    queued = _queued_spans(clipped, window.start_ns)
+    queue_pieces = _intersect(holes, queued)
 
     overlap_kind, overlap_pair = _scan_overlap(clipped)
     if overlap_kind is not None:
         reason = ASSUMPTION_MULTI if overlap_kind == "multi" else ASSUMPTION_SAME
         return _ledger(
             window, busy, idle, reason,
+            queued_idle=length(queue_pieces),
             refused=reason,
             decision=_decision(None, None, False, reason),
             overlap=_overlap_payload(overlap_pair),
         )
 
-    holes = complement(busy_spans, window.start_ns, window.end_ns)
+    # The host is not what kept the GPU idle while submitted work waited.
+    host_holes = _subtract(holes, queued)
     runtime = _same_process(window.runtime_ops, process)
     nvtx = _same_process(window.nvtx_ops, process)
-    runtime_pieces = _idle_pieces(holes, runtime)
-    nvtx_pieces = _idle_pieces(holes, nvtx)
+    runtime_pieces = _idle_pieces(host_holes, runtime)
+    nvtx_pieces = _idle_pieces(host_holes, nvtx)
     for kind, pieces in (
-        ("sync", _idle_pieces(holes, window.syncs)),
+        ("sync", _idle_pieces(host_holes, window.syncs)),
         ("runtime", runtime_pieces),
         ("nvtx", nvtx_pieces),
     ):
@@ -77,8 +86,14 @@ def account(window):
             for start, end, call in pieces
         )
     candidates.extend(
+        _candidate("queue", GPU_QUEUE_NAME, start, end)
+        for start, end in queue_pieces
+    )
+    candidates.extend(
         _candidate("gap", GPU_IDLE_NAME, start, end)
-        for start, end in _gap_pieces(holes, (*window.syncs, *runtime, *nvtx))
+        for start, end in _gap_pieces(
+            host_holes, (*window.syncs, *runtime, *nvtx),
+        )
     )
     longest = _longest(candidates)
     separate = _separate(longest, candidates)
@@ -90,6 +105,7 @@ def account(window):
     allow = _allows_rewrite(ceiling, step_time)
     return _ledger(
         window, busy, idle, ASSUMPTION_EXCLUSIVE,
+        queued_idle=length(queue_pieces),
         longest=longest,
         contained=_contained(longest, candidates, nest=True),
         separate=separate,
@@ -405,9 +421,11 @@ def _decision(longest, hottest, allow, refused):
 
     allow_rewrite can be true while a synchronize or a gap is still the
     longest blocker. Rewrite is only the case where that flag is true and
-    the hottest kernel is that blocker.
+    the hottest kernel is that blocker. A queue blocker means the GPU did
+    not run work this step had already submitted. Nothing in the step names
+    a cause, and the kernel times may be stretched by the same cause.
     """
-    if refused is not None or longest is None:
+    if refused is not None or longest is None or longest["kind"] == "queue":
         return "do not rewrite a kernel from this report"
     if (
         allow
@@ -557,6 +575,35 @@ def _short_idle(winner, separate, further, holes, idle):
     return short, longest
 
 
+def _queued_spans(ops, lo):
+    """From each launch call's end to its operation's start, inside the step.
+
+    A clipped operation that started before the step has no queue in it.
+    """
+    return merge(
+        (max(op.launch_end_ns, lo), op.start_ns)
+        for op in ops
+        if op.launch_end_ns is not None
+    )
+
+
+def _intersect(left, right):
+    """Overlap of two merged span lists. Touching does not overlap."""
+    found = []
+    i = 0
+    j = 0
+    while i < len(left) and j < len(right):
+        start = max(left[i][0], right[j][0])
+        end = min(left[i][1], right[j][1])
+        if end > start:
+            found.append((start, end))
+        if left[i][1] < right[j][1]:
+            i += 1
+        else:
+            j += 1
+    return found
+
+
 def _subtract(spans, cut):
     """Remove merged cut intervals from merged spans. Touching does not overlap."""
     kept = []
@@ -665,7 +712,7 @@ def _intersection_length(left, right):
 
 
 def _ledger(
-    window, busy, idle, assumption, *, decision,
+    window, busy, idle, assumption, *, decision, queued_idle,
     longest=None, contained=None, separate=None, further=None,
     repeated=None, short_idle=None, short_longest=None, hottest=None,
     ceiling=None, allow=False, refused=None, overlap=None,
@@ -679,6 +726,7 @@ def _ledger(
         "step_time_ns": window.end_ns - window.start_ns,
         "gpu_busy_ns": busy,
         "gpu_idle_ns": idle,
+        "queued_idle_ns": queued_idle,
         "assumption": assumption,
         "longest_blocker": longest,
         "contained": contained,

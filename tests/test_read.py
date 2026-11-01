@@ -438,6 +438,39 @@ class ReadTest(unittest.TestCase):
                 ["cudaDeviceSynchronize", "cudaStreamSynchronize"],
             )
 
+    def test_a_kernel_knows_when_its_launch_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(
+                path,
+                [{"text": "step", "start": 0, "end": 100}],
+                kernels=[
+                    {"name": "pressure", "start": 60, "end": 90},
+                    {"name": "orphan", "start": 92, "end": 95},
+                ],
+                syncs=[{"sync_type": 4, "start": 12, "end": 98}],
+                runtime=[{"name": "cudaLaunchKernel_v7000", "start": 2, "end": 10}],
+            )
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "ALTER TABLE CUPTI_ACTIVITY_KIND_KERNEL ADD COLUMN correlationId INTEGER"
+            )
+            # The runtime row has correlation id 1. Nothing launched id 7.
+            connection.execute(
+                "UPDATE CUPTI_ACTIVITY_KIND_KERNEL SET correlationId = "
+                "CASE rowid WHEN 1 THEN 1 ELSE 7 END"
+            )
+            connection.commit()
+            connection.close()
+            loaded = load_path(path, "step")
+            self.assertEqual(
+                [(op.name, op.launch_end_ns) for op in loaded.device_ops],
+                [("pressure", 10), ("orphan", None)],
+            )
+            ledger = account(loaded)
+            self.assertEqual(ledger["queued_idle_ns"], 50)
+            self.assertEqual(ledger["longest_blocker"]["kind"], "queue")
+
     def test_runtime_from_another_process_does_not_rename(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "proc.sqlite"

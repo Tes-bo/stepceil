@@ -17,6 +17,9 @@ class DeviceOp:
     process_id: int | None = None
     # Full kernel symbol. Template instances can share one short name.
     symbol: str | None = None
+    # End of the runtime call that launched this operation, when the export
+    # ties them by correlationId and that call meets the step.
+    launch_end_ns: int | None = None
 
 
 @dataclass(frozen=True)

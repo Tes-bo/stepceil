@@ -8,13 +8,15 @@ captured with Nsight Systems 2024.6.1 and trimmed by trim_export.py:
     nsys export --type sqlite -o loop.sqlite loop.nsys-rep
 
 The GPU was shared with other processes during the capture. In the later
-iterations pressure starts milliseconds after its launch returns, so the
-synchronize covers that wait. The numbers below are that capture's.
+iterations pressure starts milliseconds after its launch returns, and the
+synchronize covers that wait. The wait is the GPU queue, not the
+synchronize. The numbers below are that capture's.
 """
 
 import _path  # noqa: F401
 import unittest
 
+from stepceil.format import render_text
 from stepceil.ledger import ASSUMPTION_EXCLUSIVE, account
 from stepceil.nsys import list_ranges, load_path
 from _path import ROOT
@@ -71,22 +73,43 @@ class RealExportTest(unittest.TestCase):
         self.assertEqual(ledger["separate"]["name"], "cudaMalloc_v3020")
         self.assertEqual(ledger["separate"]["blocking_ns"], 188840932)
 
-    def test_the_synchronize_is_one_blocker(self):
-        # The runtime call is wider than the synchronization record. It is
-        # the synchronize, not a second, runtime blocker around it.
+    def test_the_wait_for_a_shared_gpu_is_the_queue(self):
         times = []
+        queued = []
         for occurrence in range(2, 6):
             window = load_path(EXPORT, "step", occurrence)
+            # The runtime call is wider than the synchronization record. It
+            # is the synchronize, not a second, runtime piece around it.
             self.assertEqual([sync.name for sync in window.syncs], [SYNC])
             self.assertNotIn(SYNC, [call.name for call in window.runtime_ops])
+            self.assertTrue(all(
+                op.launch_end_ns is not None
+                and op.launch_end_ns < op.start_ns
+                for op in window.device_ops
+            ))
             ledger = account(window)
-            self.assertEqual(ledger["longest_blocker"]["kind"], "sync")
-            self.assertEqual(ledger["longest_blocker"]["name"], SYNC)
+            self.assertEqual(ledger["longest_blocker"]["kind"], "queue")
+            self.assertEqual(ledger["longest_blocker"]["name"], "gpu queue")
             self.assertIsNone(ledger["contained"])
             self.assertEqual(ledger["separate"]["name"], "pressure")
-            self.assertEqual(ledger["decision"], f"change {SYNC} first")
+            self.assertEqual(
+                ledger["decision"], "do not rewrite a kernel from this report",
+            )
             times.append(ledger["step_time_ns"])
+            queued.append(ledger["queued_idle_ns"])
         self.assertEqual(times, [3999049, 2923571, 2934095, 2919721])
+        self.assertEqual(queued[0], 3415498)
+        self.assertTrue(all(
+            wait * 10 > time * 7 for wait, time in zip(queued, times)
+        ))
+
+    def test_readme_shows_the_second_iteration(self):
+        readme = (ROOT / "README.md").read_text()
+        text = render_text(account(load_path(EXPORT, "step", 2)))
+        excerpt = readme.split("--occurrence 2\n```\n\n```text\n")[2]
+        excerpt = excerpt.split("```", 1)[0]
+        self.assertIn(excerpt, text)
+        self.assertIn("decision: do not rewrite a kernel from this report\n", text)
 
 
 if __name__ == "__main__":
