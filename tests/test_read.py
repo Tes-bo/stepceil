@@ -397,6 +397,47 @@ class ReadTest(unittest.TestCase):
                 "Stream wait sync",
             )
 
+    def test_the_call_that_names_a_synchronize_is_that_synchronize(self):
+        # Nsight 2024.6 writes the runtime call a few hundred ns wider than
+        # the synchronization record it covers.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "wider.sqlite"
+            _export_sync_runtime(path, "Unknown", [
+                (0, 4, "cudaLaunchKernel"),
+                (5, 95, "cudaDeviceSynchronize"),
+            ], record=(10, 90))
+            loaded = load_path(path, "step")
+            self.assertEqual(
+                [(s.name, s.start_ns, s.end_ns) for s in loaded.syncs],
+                [("cudaDeviceSynchronize", 5, 95)],
+            )
+            self.assertEqual(
+                [call.name for call in loaded.runtime_ops], ["cudaLaunchKernel"],
+            )
+            ledger = account(loaded)
+            self.assertEqual(ledger["longest_blocker"]["kind"], "sync")
+            self.assertEqual(
+                ledger["longest_blocker"]["name"], "cudaDeviceSynchronize",
+            )
+            self.assertEqual(ledger["longest_blocker"]["start_ns"], 5)
+            self.assertEqual(ledger["longest_blocker"]["blocking_ns"], 90)
+            self.assertIsNone(ledger["contained"])
+
+            ambiguous = Path(tmp) / "ambiguous.sqlite"
+            _export_sync_runtime(ambiguous, "Unknown", [
+                (5, 95, "cudaDeviceSynchronize"),
+                (5, 95, "cudaStreamSynchronize"),
+            ], record=(10, 90))
+            loaded = load_path(ambiguous, "step")
+            self.assertEqual(
+                [(s.name, s.start_ns, s.end_ns) for s in loaded.syncs],
+                [("Unknown", 10, 90)],
+            )
+            self.assertEqual(
+                sorted(call.name for call in loaded.runtime_ops),
+                ["cudaDeviceSynchronize", "cudaStreamSynchronize"],
+            )
+
     def test_runtime_from_another_process_does_not_rename(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "proc.sqlite"
@@ -633,11 +674,15 @@ def _set_bytes(path, table, size):
     connection.close()
 
 
-def _export_sync_runtime(path, label, calls):
+def _export_sync_runtime(path, label, calls, record=(0, 100)):
+    """A 100 ns step with one synchronization record, correlation id 9.
+
+    Every runtime call in calls gets that same correlation id.
+    """
     write_export(
         path,
         [{"text": "step", "start": 0, "end": 100}],
-        syncs=[{"sync_type": 0, "start": 0, "end": 100}],
+        syncs=[{"sync_type": 0, "start": record[0], "end": record[1]}],
     )
     connection = sqlite3.connect(path)
     connection.execute(

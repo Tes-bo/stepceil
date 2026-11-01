@@ -151,6 +151,7 @@ def _load(connection, range_name, occurrence):
         step = _nth_closed(range_name, matches, occurrence)
     bounds = (step.start, step.end)
     calls = _runtime_calls(connection, strings, bounds)
+    syncs, merged = _syncs(connection, bounds, calls)
     return StepWindow(
         name=range_name,
         start_ns=step.start,
@@ -160,10 +161,11 @@ def _load(connection, range_name, occurrence):
             *_memcpys(connection, bounds),
             *_memsets(connection, bounds),
         ),
-        syncs=tuple(_syncs(connection, bounds, calls)),
+        syncs=tuple(syncs),
         runtime_ops=tuple(
             RuntimeOp(call.name, call.start, call.end, call.process_id)
-            for call in calls
+            for index, call in enumerate(calls)
+            if index not in merged
         ),
         nvtx_ops=tuple(_nvtx_ops(events, step)),
         process_id=step.process_id,
@@ -431,8 +433,15 @@ def _peer_device_ids(row, device_id):
 
 
 def _syncs(connection, bounds, calls):
+    """Synchronizations that meet the step, and the calls merged into them.
+
+    The second value holds indices into calls. A runtime call that names a
+    synchronization record is that synchronization: the host waits for the
+    whole call, so the synchronization takes the call's span, and the call
+    is not also a runtime blocker on the same idle.
+    """
     if not _has_table(connection, SYNC_TABLE):
-        return []
+        return [], set()
     _require_columns(connection, SYNC_TABLE, ("start", "end", "syncType"))
     columns = _columns(connection, SYNC_TABLE)
     optional = [name for name in ("correlationId", "globalPid") if name in columns]
@@ -442,13 +451,14 @@ def _syncs(connection, bounds, calls):
     )
     rows = connection.execute(query, bounds).fetchall()
     if not rows:
-        return []
+        return [], set()
     labels = _enum_labels(connection, "ENUM_CUPTI_SYNC_TYPE")
     by_correlation = {}
-    for call in calls:
+    for index, call in enumerate(calls):
         if call.correlation_id is not None:
-            by_correlation.setdefault(call.correlation_id, []).append(call)
+            by_correlation.setdefault(call.correlation_id, []).append((index, call))
     syncs = []
+    merged = set()
     for row in rows:
         start = _required_int(row, "start", SYNC_TABLE)
         end = _required_int(row, "end", SYNC_TABLE)
@@ -456,16 +466,21 @@ def _syncs(connection, bounds, calls):
             continue
         sync_type = _required_int(row, "syncType", SYNC_TABLE)
         process_id = _int_or_none(_value(row, "globalPid"))
-        name = _covering_sync_name(
+        covering = _covering_sync_calls(
             by_correlation.get(_int_or_none(_value(row, "correlationId")), ()),
             start, end, process_id,
         )
-        if name is None:
+        if covering:
+            name = covering[0][1].name
+            start = min(call.start for _index, call in covering)
+            end = max(call.end for _index, call in covering)
+            merged.update(index for index, _call in covering)
+        else:
             name = _sync_name(sync_type, labels)
         syncs.append(SyncOp(
             name=name, start_ns=start, end_ns=end, process_id=process_id,
         ))
-    return syncs
+    return syncs, merged
 
 
 def _runtime_calls(connection, strings, bounds):
@@ -507,29 +522,31 @@ def _runtime_calls(connection, strings, bounds):
     return calls
 
 
-def _covering_sync_name(calls, start, end, process_id):
-    """The runtime API name of a synchronization record, or None.
+def _covering_sync_calls(calls, start, end, process_id):
+    """The runtime calls that name a synchronization record, or nothing.
 
     CUPTI_ACTIVITY_KIND_SYNCHRONIZATION can label cudaDeviceSynchronize
     as Unknown. The runtime call with the same correlation id that covers
     the record carries the API name. A launch that only overlaps it does
     not. Correlation ids are reused across processes, so a call from
-    another process does not count when both sides name a process.
+    another process does not count when both sides name a process. Two
+    different API names cover nothing: neither is the record's name.
+
+    calls holds (index, call) pairs. The pairs returned share one name.
     """
-    names = []
-    for call in calls:
+    covering = []
+    for index, call in calls:
         if (
             process_id is not None
             and call.process_id is not None
             and call.process_id != process_id
         ):
             continue
-        covers = call.start <= start and call.end >= end
-        if covers and _is_sync_api(call.name) and call.name not in names:
-            names.append(call.name)
-    if len(names) == 1:
-        return names[0]
-    return None
+        if call.start <= start and call.end >= end and _is_sync_api(call.name):
+            covering.append((index, call))
+    if len({call.name for _index, call in covering}) == 1:
+        return covering
+    return []
 
 
 def _is_sync_api(name):
