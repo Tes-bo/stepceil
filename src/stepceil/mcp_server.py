@@ -219,13 +219,20 @@ def _call(msg_id, params):
     arguments = params.get("arguments") or {}
     if not isinstance(arguments, dict):
         return _tool_result(msg_id, "arguments must be an object", True)
-    if name == TOOL["name"]:
-        return _ceiling_call(msg_id, arguments)
-    if name == DIFF_TOOL["name"]:
-        return _diff_call(msg_id, arguments)
-    if name == RANGES_TOOL["name"]:
-        return _ranges_call(msg_id, arguments)
-    return _error(msg_id, -32602, f"unknown tool: {name}")
+    calls = {
+        TOOL["name"]: _ceiling_call,
+        DIFF_TOOL["name"]: _diff_call,
+        RANGES_TOOL["name"]: _ranges_call,
+    }
+    if name not in calls:
+        return _error(msg_id, -32602, f"unknown tool: {name}")
+    try:
+        return calls[name](msg_id, arguments)
+    except Exception as exc:
+        # A malformed export must not end the session for later requests.
+        return _tool_result(
+            msg_id, f"stepceil failed: {type(exc).__name__}: {exc}", True,
+        )
 
 
 def _ceiling_call(msg_id, arguments):

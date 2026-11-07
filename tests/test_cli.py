@@ -158,6 +158,30 @@ class CliTest(unittest.TestCase):
         self.assertTrue(message["result"]["isError"])
         self.assertIn("no such file", message["result"]["content"][0]["text"])
 
+    def test_mcp_keeps_serving_after_an_unexpected_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(path, [{"text": "step", "start": "x", "end": 10}])
+            incoming = frame({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "step_ceiling",
+                    "arguments": {"path": str(path), "range": "step"},
+                },
+            }) + frame({"jsonrpc": "2.0", "id": 2, "method": "ping"})
+            stdout = tempfile.TemporaryFile()
+            try:
+                self.assertEqual(serve(stdin=io.BytesIO(incoming), stdout=stdout), 0)
+                stdout.seek(0)
+                messages = frames(stdout.read())
+            finally:
+                stdout.close()
+        self.assertTrue(messages[0]["result"]["isError"])
+        self.assertIn("ValueError", messages[0]["result"]["content"][0]["text"])
+        self.assertEqual(messages[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
+
     def test_mcp_is_one_json_message_per_line(self):
         incoming = (
             b'{"jsonrpc":"2.0","id":1,"method":"initialize",'
