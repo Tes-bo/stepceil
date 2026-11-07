@@ -6,7 +6,8 @@ launches. Overlap withholds that ceiling. A synchronization call counts
 only on idle time; time already covered by a kernel, copy, or memset stays
 on that operation. A host API call does the same, and it is not device work.
 Idle while this step's own submitted work had not started is the GPU queue.
-No synchronization, host call, or range is charged for it.
+No synchronization, host call, or range is charged for it. A CUDA graph
+traced as a whole is busy time whose kernels the export does not name.
 """
 
 from dataclasses import replace
@@ -26,12 +27,16 @@ KIND_RANK = {
     "kernel": 0,
     "memcpy": 1,
     "memset": 2,
-    "sync": 3,
-    "runtime": 4,
-    "nvtx": 5,
-    "queue": 6,
-    "gap": 7,
+    "graph": 3,
+    "sync": 4,
+    "runtime": 5,
+    "nvtx": 6,
+    "queue": 7,
+    "gap": 8,
 }
+# Blockers no kernel rewrite can follow from: the GPU did not start
+# submitted work, or a graph hides which kernels ran.
+_NO_REWRITE_KINDS = frozenset(("queue", "graph"))
 
 
 def account(window):
@@ -423,9 +428,14 @@ def _decision(longest, hottest, allow, refused):
     longest blocker. Rewrite is only the case where that flag is true and
     the hottest kernel is that blocker. A queue blocker means the GPU did
     not run work this step had already submitted. Nothing in the step names
-    a cause, and the kernel times may be stretched by the same cause.
+    a cause, and the kernel times may be stretched by the same cause. A
+    graph blocker ran kernels the export does not name.
     """
-    if refused is not None or longest is None or longest["kind"] == "queue":
+    if (
+        refused is not None
+        or longest is None
+        or longest["kind"] in _NO_REWRITE_KINDS
+    ):
         return "do not rewrite a kernel from this report"
     if (
         allow

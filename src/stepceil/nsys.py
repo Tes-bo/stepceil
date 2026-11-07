@@ -46,6 +46,7 @@ SYNC_TYPE = {
 KERNEL_TABLE = "CUPTI_ACTIVITY_KIND_KERNEL"
 MEMCPY_TABLE = "CUPTI_ACTIVITY_KIND_MEMCPY"
 MEMSET_TABLE = "CUPTI_ACTIVITY_KIND_MEMSET"
+GRAPH_TABLE = "CUPTI_ACTIVITY_KIND_GRAPH_TRACE"
 SYNC_TABLE = "CUPTI_ACTIVITY_KIND_SYNCHRONIZATION"
 RUNTIME_TABLE = "CUPTI_ACTIVITY_KIND_RUNTIME"
 
@@ -161,6 +162,7 @@ def _load(connection, range_name, occurrence):
             *_kernels(connection, strings, bounds, launches),
             *_memcpys(connection, bounds, launches),
             *_memsets(connection, bounds, launches),
+            *_graphs(connection, bounds, launches),
         ),
         syncs=tuple(syncs),
         runtime_ops=tuple(
@@ -390,6 +392,29 @@ def _memsets(connection, bounds, launches):
         )
         for row in rows
     ]
+
+
+def _graphs(connection, bounds, launches):
+    """CUDA graph launches traced as a whole.
+
+    Under --cuda-graph-trace=graph, the default of Nsight Systems 2024.6
+    with a CUDA 11.7 or later driver, the graph's kernels are not written.
+    One row spans the whole graph on its launch stream.
+    """
+    if not _has_table(connection, GRAPH_TABLE):
+        return []
+    columns = _columns(connection, GRAPH_TABLE)
+    extra = ["graphId"] if "graphId" in columns else []
+    rows = _device_rows(connection, GRAPH_TABLE, columns, bounds, extra)
+    return [
+        _device_op("graph", GRAPH_TABLE, _graph_name(row), row, launches)
+        for row in rows
+    ]
+
+
+def _graph_name(row):
+    graph_id = _int_or_none(_value(row, "graphId"))
+    return "cuda graph" if graph_id is None else f"cuda graph {graph_id}"
 
 
 def _device_rows(connection, table, columns, bounds, extra):

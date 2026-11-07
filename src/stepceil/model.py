@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DeviceOp:
-    """One kernel, memcpy, or memset on the GPU timeline."""
+    """One kernel, memcpy, memset, or whole CUDA graph on the GPU timeline."""
 
     kind: str
     name: str

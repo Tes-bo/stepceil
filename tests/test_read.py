@@ -72,6 +72,30 @@ class ReadTest(unittest.TestCase):
             self.assertEqual(ledger["longest_blocker"]["name"], "memcpy HtoD")
             self.assertEqual(ledger["ceiling_ns"], 10)
 
+    def test_a_graph_traced_as_a_whole_is_device_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.sqlite"
+            write_export(
+                path,
+                [{"text": "step", "start": 0, "end": 100}],
+                syncs=[{"sync_type": 3, "start": 0, "end": 100}],
+                graphs=[
+                    {"start": 10, "end": 90, "graph_id": 7},
+                    {"start": 120, "end": 150},
+                ],
+            )
+            loaded = load_path(path, "step")
+            self.assertEqual(
+                [(op.kind, op.name, op.start_ns) for op in loaded.device_ops],
+                [("graph", "cuda graph 7", 10)],
+            )
+            ledger = account(loaded)
+            self.assertEqual(ledger["gpu_busy_ns"], 80)
+            self.assertEqual(ledger["longest_blocker"]["name"], "cuda graph 7")
+            self.assertEqual(
+                ledger["decision"], "do not rewrite a kernel from this report",
+            )
+
     def test_registered_nvtx_string_and_text_override(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.sqlite"

@@ -6,8 +6,13 @@ from pathlib import Path
 
 def write_export(
     path, ranges, kernels=(), copies=(), memsets=(), syncs=(), runtime=(),
+    graphs=(),
 ):
-    """runtime rows are host API calls. That table is written only when given."""
+    """runtime rows are host API calls. That table is written only when given.
+
+    graphs are whole CUDA graph launches, as Nsight Systems writes them
+    under --cuda-graph-trace=graph. That table is also written only when given.
+    """
     path = Path(path)
     connection = sqlite3.connect(path)
     try:
@@ -187,6 +192,35 @@ def write_export(
                 VALUES (?, ?, ?, ?)
                 """,
                 (item["start"], item["end"], index, intern(item["name"])),
+            )
+        if graphs:
+            connection.execute(
+                """
+                CREATE TABLE CUPTI_ACTIVITY_KIND_GRAPH_TRACE (
+                    start INTEGER,
+                    end INTEGER,
+                    deviceId INTEGER,
+                    contextId INTEGER,
+                    streamId INTEGER,
+                    graphId INTEGER
+                )
+                """
+            )
+        for item in graphs:
+            connection.execute(
+                """
+                INSERT INTO CUPTI_ACTIVITY_KIND_GRAPH_TRACE
+                    (start, end, deviceId, contextId, streamId, graphId)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item["start"],
+                    item["end"],
+                    item.get("device_id", 0),
+                    item.get("context_id", 1),
+                    item.get("stream_id", 1),
+                    item.get("graph_id", 1),
+                ),
             )
         connection.commit()
     finally:

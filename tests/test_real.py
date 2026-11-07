@@ -1,4 +1,4 @@
-"""One real capture, so the reader meets the schema Nsight Systems writes.
+"""Real captures, so the reader meets the schema Nsight Systems writes.
 
 tests/data/nsys-2024.6-loop.sqlite is tests/data/loop.cu on a Tesla V100,
 captured with Nsight Systems 2024.6.1 and trimmed by trim_export.py:
@@ -11,6 +11,11 @@ The GPU was shared with other processes during the capture. In the later
 iterations pressure starts milliseconds after its launch returns, and the
 synchronize covers that wait. The wait is the GPU queue, not the
 synchronize. The numbers below are that capture's.
+
+tests/data/nsys-2024.6-graph.sqlite is tests/data/graph.cu, captured the
+same way on a V100 no other process was using. nsys traced the graph as a
+whole, its default with this driver, so the export has one graph row per
+iteration and no kernel rows.
 """
 
 import _path  # noqa: F401
@@ -22,6 +27,7 @@ from stepceil.nsys import list_ranges, load_path
 from _path import ROOT
 
 EXPORT = ROOT / "tests" / "data" / "nsys-2024.6-loop.sqlite"
+GRAPH_EXPORT = ROOT / "tests" / "data" / "nsys-2024.6-graph.sqlite"
 SYNC = "cudaDeviceSynchronize_v3020"
 
 
@@ -110,6 +116,29 @@ class RealExportTest(unittest.TestCase):
         excerpt = excerpt.split("```", 1)[0]
         self.assertIn(excerpt, text)
         self.assertIn("decision: do not rewrite a kernel from this report\n", text)
+
+
+class RealGraphExportTest(unittest.TestCase):
+    def test_a_graph_traced_as_a_whole_is_the_busy_time(self):
+        times = []
+        for occurrence in range(1, 6):
+            window = load_path(GRAPH_EXPORT, "step", occurrence)
+            self.assertEqual(
+                [(op.kind, op.name) for op in window.device_ops],
+                [("graph", "cuda graph 1")],
+            )
+            self.assertIsNotNone(window.device_ops[0].launch_end_ns)
+            ledger = account(window)
+            # The step is the graph plus the launch and the synchronize around it.
+            self.assertGreater(ledger["gpu_busy_ns"] * 10, ledger["step_time_ns"] * 9)
+            self.assertEqual(ledger["longest_blocker"]["kind"], "graph")
+            self.assertEqual(ledger["separate"]["name"], "cudaGraphLaunch_v10000")
+            self.assertIsNone(ledger["hottest_kernel"])
+            self.assertEqual(
+                ledger["decision"], "do not rewrite a kernel from this report",
+            )
+            times.append((ledger["step_time_ns"], ledger["gpu_busy_ns"]))
+        self.assertEqual(times[1], (693799, 678812))
 
 
 if __name__ == "__main__":

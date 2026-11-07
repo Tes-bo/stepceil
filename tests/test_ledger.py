@@ -440,6 +440,36 @@ class LedgerTest(unittest.TestCase):
         self.assertIsNone(overlapped["ceiling_ns"])
         self.assertEqual(overlapped["queued_idle_ns"], 30)
 
+    def test_a_whole_graph_is_busy_but_names_no_kernel(self):
+        def graph(start, end, launch_end=None):
+            return DeviceOp(
+                "graph", "cuda graph 1", start, end, 1, 0, 1,
+                launch_end_ns=launch_end,
+            )
+
+        sync = [SyncOp("cudaStreamSynchronize", 0, 100)]
+        ledger = account(window(0, 100, [graph(5, 95, 2)], sync))
+        self.assertEqual(ledger["gpu_busy_ns"], 90)
+        self.assertEqual(ledger["queued_idle_ns"], 3)
+        self.assertEqual(ledger["longest_blocker"]["kind"], "graph")
+        self.assertEqual(ledger["longest_blocker"]["name"], "cuda graph 1")
+        self.assertIsNone(ledger["hottest_kernel"])
+        self.assertEqual(ledger["ceiling_ns"], 0)
+        self.assertFalse(ledger["allow_rewrite"])
+        self.assertEqual(
+            ledger["decision"], "do not rewrite a kernel from this report",
+        )
+
+        # A kernel outside the graph that is the longest piece is still a rewrite.
+        mixed = account(window(0, 100, [graph(0, 30), kernel("pressure", 30, 90)]))
+        self.assertEqual(mixed["longest_blocker"]["name"], "pressure")
+        self.assertEqual(mixed["separate"]["kind"], "graph")
+        self.assertEqual(mixed["decision"], "rewrite pressure")
+
+        # Idle around the graph is still charged to what covers it.
+        waited = account(window(0, 100, [graph(0, 20)], sync))
+        self.assertEqual(waited["decision"], "change cudaStreamSynchronize first")
+
     def test_hottest_tie_uses_the_earlier_launch(self):
         ledger = account(window(0, 100, [
             kernel("alpha", 50, 90),
