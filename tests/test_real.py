@@ -12,6 +12,10 @@ iterations pressure starts milliseconds after its launch returns, and the
 synchronize covers that wait. The wait is the GPU queue, not the
 synchronize. The numbers below are that capture's.
 
+tests/data/nsys-2024.6-loop-idle.sqlite is the same program captured the
+same way on a V100 no other process was using. pressure starts about 2 us
+after its launch returns, so the later iterations rewrite it.
+
 tests/data/nsys-2024.6-graph.sqlite is tests/data/graph.cu, captured the
 same way on a V100 no other process was using. nsys traced the graph as a
 whole, its default with this driver, so the export has one graph row per
@@ -27,6 +31,7 @@ from stepceil.nsys import list_ranges, load_path
 from _path import ROOT
 
 EXPORT = ROOT / "tests" / "data" / "nsys-2024.6-loop.sqlite"
+IDLE_EXPORT = ROOT / "tests" / "data" / "nsys-2024.6-loop-idle.sqlite"
 GRAPH_EXPORT = ROOT / "tests" / "data" / "nsys-2024.6-graph.sqlite"
 SYNC = "cudaDeviceSynchronize_v3020"
 
@@ -116,6 +121,25 @@ class RealExportTest(unittest.TestCase):
         excerpt = excerpt.split("```", 1)[0]
         self.assertIn(excerpt, text)
         self.assertIn("decision: do not rewrite a kernel from this report\n", text)
+
+
+class RealIdleExportTest(unittest.TestCase):
+    def test_without_a_queue_the_hot_kernel_is_the_rewrite(self):
+        first = account(load_path(IDLE_EXPORT, "step", 1))
+        self.assertEqual(first["decision"], "change gpu idle first")
+        for occurrence in range(2, 6):
+            ledger = account(load_path(IDLE_EXPORT, "step", occurrence))
+            # The launch-to-start moment is microseconds, not a blocker.
+            self.assertLess(ledger["queued_idle_ns"] * 100, ledger["step_time_ns"])
+            self.assertEqual(ledger["longest_blocker"]["kind"], "kernel")
+            self.assertEqual(ledger["longest_blocker"]["symbol"], "_Z8pressurePfii")
+            self.assertTrue(ledger["allow_rewrite"])
+            self.assertEqual(ledger["decision"], "rewrite pressure")
+        second = account(load_path(IDLE_EXPORT, "step", 2))
+        self.assertEqual(
+            (second["step_time_ns"], second["ceiling_ns"], second["queued_idle_ns"]),
+            (690991, 669563, 2067),
+        )
 
 
 class RealGraphExportTest(unittest.TestCase):

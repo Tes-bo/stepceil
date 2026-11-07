@@ -108,7 +108,7 @@ longest_blocker.kind: queue
 longest_blocker.name: gpu queue
 ```
 
-A `queue` blocker makes the decision `do not rewrite a kernel from this report`. The export does not say what held the GPU, and whatever did may also have stretched the kernel times. Capture again on a GPU no other process is using.
+A `queue` blocker makes the decision `do not rewrite a kernel from this report`. The export does not say what held the GPU, and whatever did may also have stretched the kernel times. Capture again on a GPU no other process is using. `tests/data/nsys-2024.6-loop-idle.sqlite` is the same program on a V100 nothing else was using: `pressure` starts about 2 µs after its launch returns, and iterations 2 to 5 say `rewrite pressure`.
 
 ## The hot kernel is not always the step
 
